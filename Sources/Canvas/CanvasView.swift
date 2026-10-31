@@ -2448,7 +2448,8 @@ final class CanvasView: NSView {
                 onPress?(d.proxy, CGPoint(x: r.minX + d.grabOffset.x, y: r.minY + d.grabOffset.y))
             case .window:
                 // Brought to the front on the press. Zoomed in or out, the click enters it at 1:1 right
-                // where it is, around the clicked spot; a double-click brings it to the middle instead.
+                // where it is, around the clicked spot (or in the middle, by Settings › Canvas); a
+                // double-click brings it to the middle.
                 clickEntering = d.proxy
                 onClickEnter?(d.proxy, d.start, d.grabOffset)
             }

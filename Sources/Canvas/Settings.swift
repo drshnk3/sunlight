@@ -76,6 +76,7 @@ enum Settings {
     nonisolated private static let panFingersKey = "CanvasPanFingers"
     private static let zoomInertiaKey = "CanvasZoomInertia"
     private static let snapToWindowsKey = "CanvasSnapToWindows"
+    private static let clickCentresKey = "CanvasClickCentres"
     private static let rememberCanvasKey = "CanvasRemember"
     private static let otherWindowsKey = "CanvasOtherWindowsOnRestore"
     private static let switcherEdgeKey = "SwitcherEdge"
@@ -342,6 +343,14 @@ enum Settings {
     static var snapToWindows: Bool {
         get { defaults.object(forKey: snapToWindowsKey) as? Bool ?? true }
         set { defaults.set(newValue, forKey: snapToWindowsKey) }
+    }
+
+    /// A single click on a window, zoomed in or out, brings it to the middle of the screen and enters
+    /// it, as a double-click does, instead of entering it at 1:1 right where it sits (which leaves a
+    /// big window partly off the screen). Off by default.
+    static var clickCentres: Bool {
+        get { defaults.object(forKey: clickCentresKey) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: clickCentresKey) }
     }
 
     /// The canvas is written down as it changes and put back at the next launch (see `LayoutStore`).
@@ -1205,6 +1214,10 @@ private struct CanvasPane: View {
                 Toggle(isOn: model.bind({ Settings.snapToWindows }, { Settings.snapToWindows = $0 })) {
                     RowLabel(title: "Snap to full screen windows",
                              subtitle: "Stopping almost exactly on a screen-sized window nudges the canvas onto it and enters it.")
+                }
+                Toggle(isOn: model.bind({ Settings.clickCentres }, { Settings.clickCentres = $0 })) {
+                    RowLabel(title: "Click centres the window",
+                             subtitle: "One click brings a window to the middle of the screen and enters it, as a double-click does, so all of it is in view. Off, a click enters it right where it sits.")
                 }
             } header: {
                 SectionHeader(title: "Moving around",

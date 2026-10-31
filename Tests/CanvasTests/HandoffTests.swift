@@ -38,6 +38,17 @@ final class HandoffTests: XCTestCase {
         XCTAssertFalse(p.clicked)
     }
 
+    func testACentringClickGoesToTheMiddleAndStillFliesAsAClick() {
+        let p = plan(.clickedCentred)
+        XCTAssertEqual(p.origin, plan(.centered).origin)
+        XCTAssertEqual(p.camera, plan(.centered).camera)
+        XCTAssertNil(p.inPlace)
+        XCTAssertTrue(p.clicked)
+        // A screen-sized window comes whole onto the screen, top-left under the menu bar.
+        let big = plan(.clickedCentred, rect: CGRect(x: 0, y: 0, width: 2000, height: 1162))
+        XCTAssertEqual(big.origin, CGPoint(x: 0, y: 38))
+    }
+
     func testAClickKeepsTheClickedSpotUnderThePointer() {
         let p = plan(.clicked(at: CGPoint(x: 1000, y: 700), offset: CGPoint(x: 100, y: 50)))
         XCTAssertEqual(p.origin, CGPoint(x: 900, y: 650))

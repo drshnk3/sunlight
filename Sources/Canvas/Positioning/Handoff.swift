@@ -22,6 +22,9 @@ enum Handoff {
         /// A click on the proxy at `offset` inside it (world units, which are the real window's points):
         /// it grows to 1:1 around the clicked spot, which stays under the pointer as far as the screen allows.
         case clicked(at: CGPoint, offset: CGPoint)
+        /// A click, with Settings › Canvas › "Click centres the window": in the middle, as `centered`,
+        /// but flown as long as a click's way in, so a double-click's second click still lands on the canvas.
+        case clickedCentred
     }
 
     /// Where the window goes and how the camera gets there. All in view coordinates (the display's
@@ -52,6 +55,9 @@ enum Handoff {
         switch placement {
         case .centered:
             origin = centredOrigin(of: rect, in: visible)
+        case .clickedCentred:
+            origin = centredOrigin(of: rect, in: visible)
+            clicked = true
         case .inPlace(let point):
             // The point's x stays under the pointer and the title bar stays at the height it is on screen
             // now: zoomed out, the window grows down from its top edge; at 1:1 nothing moves.

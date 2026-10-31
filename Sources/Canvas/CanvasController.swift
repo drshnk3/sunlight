@@ -320,7 +320,9 @@ final class CanvasController {
         view.onSpring = { [weak self] proxy, point in self?.springInto(proxy, around: point) }
         view.onFileDragEnded = { [weak self] in self?.fileDragEnded() }
         view.onEnter = { [weak self] proxy, point in self?.handoff(to: proxy, placement: .inPlace(around: point)) }
-        view.onClickEnter = { [weak self] proxy, point, offset in self?.handoff(to: proxy, placement: .clicked(at: point, offset: offset)) }
+        view.onClickEnter = { [weak self] proxy, point, offset in
+            self?.handoff(to: proxy, placement: Settings.clickCentres ? .clickedCentred : .clicked(at: point, offset: offset))
+        }
         view.onUse = { [weak self] proxy, point, press in self?.use(proxy, around: point, press: press) }
         view.onUseFollow = { [weak self] event in self?.followPress(event) }
         view.onUseScroll = { [weak self] proxy, point, scroll in self?.useScroll(proxy, around: point, scroll: scroll) }
