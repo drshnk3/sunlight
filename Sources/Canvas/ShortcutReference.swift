@@ -11,19 +11,22 @@ enum ShortcutReference {
     }
 
     /// The canvas, in the order you'd learn it.
-    static let canvasRows: [Row] = [
-        Row(title: "Zoom", keys: "pinch · ⌥ or ⌘ scroll"),
-        Row(title: "Pan", keys: "two-finger scroll · four-finger drag"),
-        Row(title: "Move a window", keys: "drag"),
-        Row(title: "Flip a window's pole", keys: "P · its ⊕/⊖ button"),
-        Row(title: "Enter where it is", keys: "click · pinch in"),
-        Row(title: "Centre and enter", keys: "double-click · ⏎"),
-        Row(title: "Use a window at 1:1", keys: "click"),
-        Row(title: "See everything", keys: "four-finger tap"),
-        Row(title: "Canvas ↔ last window", keys: "Mission Control key · four-finger tap"),
-        Row(title: "Switch apps", keys: "⌘Tab · then ⌘← ⌘→"),
-        Row(title: "Switch the app's windows", keys: "⌘Tab, then ⌘` · ⌘↑ ⌘↓"),
-    ]
+    static var canvasRows: [Row] {
+        let n = Settings.panFingers.word
+        return [
+            Row(title: "Zoom", keys: "pinch · ⌥ or ⌘ scroll"),
+            Row(title: "Pan", keys: "two-finger scroll · \(n)-finger drag"),
+            Row(title: "Move a window", keys: "drag"),
+            Row(title: "Flip a window's pole", keys: "P · its ⊕/⊖ button"),
+            Row(title: "Enter where it is", keys: "click · pinch in"),
+            Row(title: "Centre and enter", keys: "double-click · ⏎"),
+            Row(title: "Use a window at 1:1", keys: "click"),
+            Row(title: "See everything", keys: "\(n)-finger tap"),
+            Row(title: "Canvas ↔ last window", keys: "Mission Control key · \(n)-finger tap"),
+            Row(title: "Switch apps", keys: "⌘Tab · then ⌘← ⌘→"),
+            Row(title: "Switch the app's windows", keys: "⌘Tab, then ⌘` · ⌘↑ ⌘↓"),
+        ]
+    }
 
     /// Sunlight's own commands, leaving out the experimental ones that are off (`Settings.arranging`,
     /// `Settings.stripModeEnabled`).

@@ -1380,7 +1380,7 @@ final class CanvasController {
         let inFront = NSApp.isActive && activeProxy == nil
         switch phase {
         case .seeAll:
-            NSLog("Pan: four-finger See All")
+            NSLog("Pan: trackpad See All")
             // A flick was a drag until this moment: the pan stops where it is, without coasting.
             if inFront, pendingPan == nil { view.trackpadPanCancelled() }
             pendingPan = nil
@@ -1391,10 +1391,10 @@ final class CanvasController {
             // All, not back again. On the canvas, either gesture again goes back into the last window.
             if fromWindow || !NSApp.isActive { showCanvas(fitAll: true) } else { toggle() }
         case .spread:
-            NSLog("Pan: four-finger spread")
+            NSLog("Pan: trackpad spread")
             showDesktop()
         case .began:
-            NSLog("Pan: four-finger drag\(inFront ? "" : ", bringing the canvas back")")
+            NSLog("Pan: trackpad drag\(inFront ? "" : ", bringing the canvas back")")
             pendingPan = nil
             panBroughtCanvas = !inFront
             if !inFront {

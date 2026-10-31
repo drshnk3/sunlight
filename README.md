@@ -41,7 +41,8 @@ Desktop all land on it. So it's still your Mac. It just has room now.
 
 ## Features
 
-- 🗺️ **One infinite canvas.** Pan with two fingers, pinch to zoom, four-finger drag to pan from anywhere,
+- 🗺️ **One infinite canvas.** Pan with two fingers, pinch to zoom, four-finger drag (or three, in Settings ›
+  Trackpad, as macOS's own swipes come) to pan from anywhere,
   even over a window.
 - 🪟 **Real windows, not screenshots.** With live windows on, the canvas shows the actual windows, scaled
   in place by a small add-on in the Dock. At 1:1 you can click, type and scroll in them right there.

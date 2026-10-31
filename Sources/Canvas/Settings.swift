@@ -73,6 +73,7 @@ enum Settings {
     private static let tidyOrderKey = "TidyOrder"
     private static let panInertiaKey = "CanvasPanInertia"
     private static let seeAllGestureKey = "CanvasSeeAllGesture"
+    nonisolated private static let panFingersKey = "CanvasPanFingers"
     private static let zoomInertiaKey = "CanvasZoomInertia"
     private static let snapToWindowsKey = "CanvasSnapToWindows"
     private static let rememberCanvasKey = "CanvasRemember"
@@ -260,14 +261,56 @@ enum Settings {
 
     // MARK: Trackpad
 
-    /// The four-finger gesture that shows everything (and, done again on the canvas, goes back into
-    /// the last window), as the Mission Control key does. A tap leaves every four-finger drag a pan; a
+    /// How many fingers pan from anywhere, tap (or flick up) for See All: four by default, or three as
+    /// the Mac's own Mission Control and full-screen swipes come. Show Desktop is thumb and three
+    /// fingers either way, as on the Mac.
+    enum PanFingers: Int, CaseIterable, Identifiable, Sendable {
+        case three = 3, four = 4
+        var id: Self { self }
+        /// "three" or "four", for "four-finger drag" and "drag with four fingers".
+        var word: String { self == .three ? "three" : "four" }
+        var title: String { self == .three ? "Three fingers" : "Four fingers" }
+    }
+    nonisolated static let panFingersDidChange = Notification.Name("SunlightPanFingersDidChange")
+    /// Read off the main actor too: the gesture pictures and their words follow it.
+    nonisolated static var panFingers: PanFingers {
+        get { PanFingers(rawValue: UserDefaults.standard.integer(forKey: panFingersKey)) ?? .four }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: panFingersKey)
+            NotificationCenter.default.post(name: panFingersDidChange, object: nil)
+        }
+    }
+
+    /// The Mac's own trackpad choices that a three-finger touch would clash with: Accessibility's
+    /// three-finger drag (it moves the pointer with the button held) and Look Up on a three-finger tap.
+    /// Neither comes through the Dock-control events Sunlight drops, so both would still happen.
+    nonisolated static var threeFingerClashes: [String] {
+        let domains = ["com.apple.AppleMultitouchTrackpad", "com.apple.driver.AppleBluetoothMultitouch.trackpad"]
+            .compactMap { UserDefaults(suiteName: $0) }
+        var clashes: [String] = []
+        if domains.contains(where: { $0.bool(forKey: "TrackpadThreeFingerDrag") }) {
+            clashes.append("Three-finger drag is on (System Settings › Accessibility › Pointer Control › Trackpad Options): it drags too.")
+        }
+        if domains.contains(where: { $0.integer(forKey: "TrackpadThreeFingerTapGesture") == 2 }) {
+            clashes.append("Look Up is on a three-finger tap (System Settings › Trackpad): it looks up the word under the pointer too.")
+        }
+        return clashes
+    }
+
+    /// The gesture that shows everything (and, done again on the canvas, goes back into the last
+    /// window), as the Mission Control key does. A tap leaves every drag of `panFingers` a pan; a
     /// swipe up, Mission Control's own gesture, takes the quick upward stroke from panning.
     enum SeeAllGesture: String, CaseIterable, Identifiable {
         case tap, swipeUp
         var id: Self { self }
-        var title: String { self == .tap ? "Four-finger tap" : "Four-finger swipe up" }
-        var how: String { self == .tap ? "Tap with four fingers" : "Swipe up with four fingers" }
+        var title: String {
+            let n = Settings.panFingers.word.capitalized
+            return self == .tap ? "\(n)-finger tap" : "\(n)-finger swipe up"
+        }
+        var how: String {
+            let n = Settings.panFingers.word
+            return self == .tap ? "Tap with \(n) fingers" : "Swipe up with \(n) fingers"
+        }
     }
     static let seeAllGestureDidChange = Notification.Name("SunlightSeeAllGestureDidChange")
     static var seeAllGesture: SeeAllGesture {
@@ -280,7 +323,7 @@ enum Settings {
 
     // MARK: Inertia
 
-    /// A four-finger or scroll pan keeps going after the fingers lift, slowing as a scroll does (see
+    /// A `panFingers` drag or a scroll pan keeps going after the fingers lift, slowing as a scroll does (see
     /// `Motion.PanCoast`). Off, the canvas stops dead when the fingers do, and the Mac's own scroll
     /// momentum is ignored too. On by default. Reduce Motion turns both inertias off either way.
     static var panInertia: Bool {
@@ -1153,7 +1196,7 @@ private struct CanvasPane: View {
             Section {
                 Toggle(isOn: model.bind({ Settings.panInertia }, { Settings.panInertia = $0 })) {
                     RowLabel(title: "Inertia when panning",
-                             subtitle: "A four-finger or scroll pan keeps gliding for a moment after the fingers lift.")
+                             subtitle: "A \(Settings.panFingers.word)-finger or scroll pan keeps gliding for a moment after the fingers lift.")
                 }
                 Toggle(isOn: model.bind({ Settings.zoomInertia }, { Settings.zoomInertia = $0 })) {
                     RowLabel(title: "Inertia when zooming",

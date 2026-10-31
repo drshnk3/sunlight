@@ -354,7 +354,7 @@ final class CanvasView: NSView {
     /// with them down isn't a rest.
     private var scrollHeld = false
     private var pinchHeld = false
-    private var fourFingersHeld = false
+    private var panFingersHeld = false
     /// When the last input event arrived: the link stays up this long after, so a gesture doesn't
     /// stop and restart it between events.
     private var lastInput: CFTimeInterval = 0
@@ -832,7 +832,7 @@ final class CanvasView: NSView {
         beginInput()
         let k = bounds.width * CanvasView.trackpadPanGain
         let delta = CGVector(dx: travel.dx * k, dy: travel.dy * k)
-        fourFingersHeld = true
+        panFingersHeld = true
         panTravel.x += delta.dx
         panTravel.y += delta.dy
         panVelocity.add(panTravel, at: CACurrentMediaTime())
@@ -857,13 +857,13 @@ final class CanvasView: NSView {
     func trackpadPanCancelled() {
         panTravel = .zero
         panVelocity = Magnetism.Velocity()
-        fourFingersHeld = false
+        panFingersHeld = false
     }
 
     /// A gesture's fingers came off: the camera may be at rest already, with the link long stopped, so
     /// one comes round to see (`settleIfStill`).
     private func fingersLifted() {
-        fourFingersHeld = false
+        panFingersHeld = false
         guard settleWhenStill else { return }
         startDisplayLink()
     }
@@ -879,7 +879,7 @@ final class CanvasView: NSView {
     private func settleIfStill(at now: CFTimeInterval) {
         guard settleWhenStill, animation == nil, flight == nil, magnet == nil, pending.isEmpty, coast == nil,
               zoomCoast == nil, now - lastInput > CanvasView.inputLinger, !scrollHeld, !pinchHeld,
-              !fourFingersHeld, !panning, dragging == nil, resizing == nil else { return }
+              !panFingersHeld, !panning, dragging == nil, resizing == nil else { return }
         settleWhenStill = false
         _ = onSettle?()
     }

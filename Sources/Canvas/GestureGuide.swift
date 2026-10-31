@@ -21,14 +21,16 @@ enum GestureGuide {
 
         /// The gestures in this tab, with See All shown the way Settings › Trackpad has it.
         func gestures(seeAll: Settings.SeeAllGesture) -> [Gesture] {
-            Gesture.allCases.filter { $0.group == self && $0 != (seeAll == .tap ? .swipeUp : .fourFingerTap) }
+            Gesture.allCases.filter { $0.group == self && $0 != (seeAll == .tap ? .swipeUp : .handTap) }
         }
 
         var footer: String? {
             switch self {
             case .pointAndClick: return "Clicks go to the window itself once it's at 1:1, as on the desktop."
             case .zoomAndPan: return "⌥ or ⌘ with a scroll zooms too, for a mouse."
-            case .more: return "While Sunlight runs, four-finger swipes are its own: Mission Control, Spaces and Launchpad don't see them. Five fingers are left to the Mac."
+            case .more: return Settings.panFingers == .three
+                ? "While Sunlight runs, three- and four-finger swipes are its own: Mission Control, Spaces and Launchpad don't see them. Five fingers are left to the Mac."
+                : "While Sunlight runs, four-finger swipes are its own: Mission Control, Spaces and Launchpad don't see them. Five fingers are left to the Mac."
             }
         }
     }
@@ -36,7 +38,7 @@ enum GestureGuide {
     enum Gesture: String, CaseIterable, Identifiable {
         case click, doubleClick, drag, secondaryClick
         case pinch, pinchIn, scroll
-        case fourFingerDrag, fourFingerTap, swipeUp, spread
+        case handDrag, handTap, swipeUp, spread
 
         var id: Self { self }
 
@@ -44,7 +46,7 @@ enum GestureGuide {
             switch self {
             case .click, .doubleClick, .drag, .secondaryClick: return .pointAndClick
             case .pinch, .pinchIn, .scroll: return .zoomAndPan
-            case .fourFingerDrag, .fourFingerTap, .swipeUp, .spread: return .more
+            case .handDrag, .handTap, .swipeUp, .spread: return .more
             }
         }
 
@@ -58,8 +60,8 @@ enum GestureGuide {
             case .pinch: return "Zoom in or out"
             case .pinchIn: return "Enter where it is"
             case .scroll: return "Pan the canvas"
-            case .fourFingerDrag: return "Pan from anywhere"
-            case .fourFingerTap, .swipeUp: return "See everything"
+            case .handDrag: return "Pan from anywhere"
+            case .handTap, .swipeUp: return "See everything"
             case .spread: return "Show Desktop"
             }
         }
@@ -74,9 +76,9 @@ enum GestureGuide {
             case .pinch: return "Pinch with two fingers"
             case .pinchIn: return "Spread two fingers over a window, all the way"
             case .scroll: return "Slide two fingers"
-            case .fourFingerDrag: return "Drag with four fingers"
-            case .fourFingerTap: return "Tap with four fingers"
-            case .swipeUp: return "Swipe up with four fingers"
+            case .handDrag: return "Drag with \(Settings.panFingers.word) fingers"
+            case .handTap: return "Tap with \(Settings.panFingers.word) fingers"
+            case .swipeUp: return "Swipe up with \(Settings.panFingers.word) fingers"
             case .spread: return "Spread your thumb and three fingers"
             }
         }
@@ -91,8 +93,8 @@ enum GestureGuide {
             case .pinch: return "Zooms about the point between your fingers, and tails off when they lift."
             case .pinchIn: return "Zoom in until the window fills the screen and it's yours, right where it sits."
             case .scroll: return "The canvas follows your fingers. At 1:1 over a window, the window scrolls instead."
-            case .fourFingerDrag: return "Any direction, over windows and from inside one too: the canvas comes back and follows your fingers."
-            case .fourFingerTap: return "From a window, the canvas with every window in view, as Mission Control does. Tapped again on the canvas, it goes back into the window you came from."
+            case .handDrag: return "Any direction, over windows and from inside one too: the canvas comes back and follows your fingers."
+            case .handTap: return "From a window, the canvas with every window in view, as Mission Control does. Tapped again on the canvas, it goes back into the window you came from."
             case .swipeUp: return "A quick stroke up, as for Mission Control: the canvas with every window in view. Again on the canvas, it goes back into the window you came from. A slow drag up pans."
             case .spread: return "The windows move aside for Finder's desktop. F11 does the same."
             }
@@ -102,7 +104,8 @@ enum GestureGuide {
             switch self {
             case .click, .doubleClick, .drag: return 1
             case .secondaryClick, .pinch, .pinchIn, .scroll: return 2
-            case .fourFingerDrag, .fourFingerTap, .swipeUp, .spread: return 4
+            case .handDrag, .handTap, .swipeUp: return Settings.panFingers.rawValue
+            case .spread: return 4
             }
         }
 
@@ -111,9 +114,9 @@ enum GestureGuide {
             switch self {
             case .secondaryClick: return 3.0
             case .drag: return 3.4
-            case .click, .doubleClick, .pinch, .pinchIn, .fourFingerTap, .swipeUp, .spread: return 3.6
+            case .click, .doubleClick, .pinch, .pinchIn, .handTap, .swipeUp, .spread: return 3.6
             case .scroll: return 4.0
-            case .fourFingerDrag: return 4.2
+            case .handDrag: return 4.2
             }
         }
 
@@ -127,8 +130,8 @@ enum GestureGuide {
             case .pinch: return 1.6
             case .pinchIn: return 1.6
             case .scroll: return 1.0
-            case .fourFingerDrag: return 1.8
-            case .fourFingerTap: return 1.0
+            case .handDrag: return 1.8
+            case .handTap: return 1.0
             case .swipeUp: return 0.95
             case .spread: return 1.3
             }
@@ -275,7 +278,7 @@ enum GestureGuide {
             f.fingers = [CGPoint(x: x - 0.06, y: 0.5), CGPoint(x: x + 0.06, y: 0.48)]
             f.touch = touch(t, on: 0.3, off: 1.7) + touch(t, on: 2.1, off: 3.5)
             f.camera = Camera(center: CGPoint(x: 0.5 + 0.25 * (out - back), y: 0.5), zoom: 1)
-        case .fourFingerDrag:
+        case .handDrag:
             let out = ramp(t, 0.5, 1.0), pan = ramp(t, 1.1, 2.5)
             // On a slant, down and to the left: any way but straight up pans.
             f.fingers = hand(at: CGPoint(x: 0.62 - 0.24 * pan, y: 0.42 + 0.16 * pan))
@@ -286,7 +289,7 @@ enum GestureGuide {
             f.camera = camera
             f.raised = true
             f.opacity = loopFade
-        case .fourFingerTap:
+        case .handTap:
             f.fingers = hand(at: CGPoint(x: 0.5, y: 0.5))
             f.touch = touch(t, on: 0.9, off: 1.1)
             f.camera = Camera.entered.mix(.overview, ramp(t, 1.1, 1.9))
@@ -349,9 +352,11 @@ enum GestureGuide {
         return [CGPoint(x: c.x - dx, y: c.y + dy), CGPoint(x: c.x + dx, y: c.y - dy)]
     }
 
-    /// Four fingertips side by side in a gentle arc, as a hand rests.
+    /// The drag's fingertips (`Settings.panFingers`) side by side in a gentle arc, as a hand rests.
     private static func hand(at c: CGPoint) -> [CGPoint] {
-        let offsets: [(CGFloat, CGFloat)] = [(-0.20, 0.06), (-0.07, -0.03), (0.07, -0.04), (0.20, 0.03)]
+        let offsets: [(CGFloat, CGFloat)] = Settings.panFingers == .three
+            ? [(-0.13, 0.03), (0, -0.04), (0.13, 0.02)]
+            : [(-0.20, 0.06), (-0.07, -0.03), (0.07, -0.04), (0.20, 0.03)]
         return offsets.map { CGPoint(x: c.x + $0.0, y: c.y + $0.1) }
     }
 }
@@ -563,6 +568,9 @@ struct TrackpadPane: View {
     @State private var group: GestureGuide.Group = .pointAndClick
     @State private var gesture: GestureGuide.Gesture = .click
     @State private var seeAll: Settings.SeeAllGesture = Settings.seeAllGesture
+    @State private var fingers: Settings.PanFingers = Settings.panFingers
+    /// The Mac's own three-finger gestures that would happen too (`Settings.threeFingerClashes`).
+    @State private var clashes: [String] = []
 
     var body: some View {
         Form {
@@ -621,6 +629,26 @@ struct TrackpadPane: View {
                 }
             }
             Section {
+                Picker("Fingers", selection: $fingers) {
+                    ForEach(Settings.PanFingers.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+            } header: {
+                SectionHeader(title: "Fingers",
+                              detail: "How many fingers pan from anywhere and show everything. Three is how the Mac's own Mission Control and full-screen swipes come; Show Desktop stays your thumb and three fingers.")
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    if fingers == .three {
+                        Text("While Sunlight runs, three-finger swipes are its own: Mission Control and swiping between full-screen apps don't see them.")
+                        ForEach(clashes, id: \.self) { Label($0, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Section {
                 Picker("See everything with", selection: $seeAll) {
                     ForEach(Settings.SeeAllGesture.allCases) { Text($0.title).tag($0) }
                 }
@@ -628,19 +656,24 @@ struct TrackpadPane: View {
                 .labelsHidden()
             } header: {
                 SectionHeader(title: "See everything",
-                              detail: "Which four-finger gesture shows the whole canvas, and goes back into the last window when done again on the canvas, as the Mission Control key does.")
+                              detail: "Which \(fingers.word)-finger gesture shows the whole canvas, and goes back into the last window when done again on the canvas, as the Mission Control key does.")
             } footer: {
-                Text("A tap leaves every four-finger drag a pan, up included. A swipe up is Mission Control's own gesture, but a quick upward stroke then shows everything instead of panning; a slow drag up still pans.")
+                Text("A tap leaves every \(fingers.word)-finger drag a pan, up included. A swipe up is Mission Control's own gesture, but a quick upward stroke then shows everything instead of panning; a slow drag up still pans.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
+        .onAppear { clashes = Settings.threeFingerClashes }
+        .onChange(of: fingers) {
+            Settings.panFingers = fingers
+            clashes = Settings.threeFingerClashes
+        }
         .onChange(of: group) { gesture = group.gestures(seeAll: seeAll)[0] }
         .onChange(of: seeAll) {
             Settings.seeAllGesture = seeAll
-            if gesture == .fourFingerTap || gesture == .swipeUp { gesture = seeAll == .tap ? .fourFingerTap : .swipeUp }
+            if gesture == .handTap || gesture == .swipeUp { gesture = seeAll == .tap ? .handTap : .swipeUp }
         }
     }
 }

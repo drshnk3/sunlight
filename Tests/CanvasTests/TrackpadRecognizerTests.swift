@@ -190,6 +190,101 @@ final class TrackpadRecognizerTests: XCTestCase {
         XCTAssertEqual(phases, [.spread])
     }
 
+    // MARK: Three fingers (Settings › Trackpad)
+
+    private let three: Set<Int32> = [1, 2, 3]
+
+    private func threeFingers() -> TrackpadRecognizer {
+        var r = TrackpadRecognizer()
+        r.fingerCount = 3
+        return r
+    }
+
+    func testWithThreeChosenAThreeFingerDragPans() {
+        var r = threeFingers()
+        var phases: [TrackpadPan.Phase] = []
+        for (i, p) in line(from: CGPoint(x: 0.2, y: 0.5), to: CGPoint(x: 0.6, y: 0.52)).enumerated() {
+            phases += r.update(device: 1, fingers: three, centroid: p, now: Double(i) * 0.01)
+        }
+        XCTAssertGreaterThan(r.dropDockControlUntil, 0, "the Dock's three-finger swipe is dropped")
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.2)
+        XCTAssertEqual(phases.first, .began)
+        XCTAssertEqual(phases.last, .ended)
+        XCTAssertTrue(travel(in: phases).allSatisfy { $0.dy == 0 && $0.dx > 0 })
+    }
+
+    func testWithThreeChosenAThreeFingerTapIsSeeAll() {
+        var r = threeFingers()
+        var phases: [TrackpadPan.Phase] = []
+        phases += r.update(device: 1, fingers: three, centroid: CGPoint(x: 0.5, y: 0.5), now: 0)
+        phases += r.update(device: 1, fingers: three, centroid: CGPoint(x: 0.5, y: 0.5), now: 0.1)
+        phases += r.update(device: 1, fingers: [1], centroid: CGPoint(x: 0.5, y: 0.5), now: 0.12)
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.13)
+        XCTAssertEqual(phases, [.seeAll])
+    }
+
+    func testWithThreeChosenFourFingersNeitherPanNorTap() {
+        var r = threeFingers()
+        var phases: [TrackpadPan.Phase] = []
+        for (i, p) in line(from: CGPoint(x: 0.2, y: 0.5), to: CGPoint(x: 0.6, y: 0.5)).enumerated() {
+            phases += r.update(device: 1, fingers: four, centroid: p, spread: 0.1, now: Double(i) * 0.01)
+        }
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.2)
+        XCTAssertEqual(phases, [])
+        // A four-finger tap isn't one either.
+        var t = threeFingers()
+        phases = t.update(device: 1, fingers: four, centroid: CGPoint(x: 0.5, y: 0.5), now: 0)
+        phases += t.update(device: 1, fingers: [], centroid: .zero, now: 0.1)
+        XCTAssertEqual(phases, [])
+    }
+
+    func testWithThreeChosenThumbAndThreeStillSpread() {
+        var r = threeFingers()
+        var phases: [TrackpadPan.Phase] = []
+        // The fingers land one by one: three of them first, for a moment.
+        phases += r.update(device: 1, fingers: three, centroid: CGPoint(x: 0.5, y: 0.5), spread: 0.08, now: 0)
+        for i in 0...10 {
+            let h = hand(parted: 2 * CGFloat(i) / 10)
+            phases += r.update(device: 1, fingers: four, centroid: h.centroid, spread: h.spread, now: 0.02 + Double(i) * 0.02)
+        }
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.4)
+        XCTAssertEqual(phases, [.spread])
+    }
+
+    func testWithThreeChosenThreeFingersLeftAfterASpreadDontPan() {
+        var r = threeFingers()
+        var phases: [TrackpadPan.Phase] = []
+        phases += r.update(device: 1, fingers: four, centroid: CGPoint(x: 0.5, y: 0.5), spread: 0.08, now: 0)
+        phases += r.update(device: 1, fingers: four, centroid: CGPoint(x: 0.5, y: 0.5), spread: 0.2, now: 0.05)
+        for (i, p) in line(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.9, y: 0.5)).enumerated() {
+            phases += r.update(device: 1, fingers: three, centroid: p, now: 0.1 + Double(i) * 0.01)
+        }
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.4)
+        XCTAssertEqual(phases, [.spread])
+    }
+
+    func testWithFourChosenThreeFingersDoNothing() {
+        var r = TrackpadRecognizer()
+        var phases: [TrackpadPan.Phase] = []
+        for (i, p) in line(from: CGPoint(x: 0.2, y: 0.5), to: CGPoint(x: 0.6, y: 0.5)).enumerated() {
+            phases += r.update(device: 1, fingers: three, centroid: p, now: Double(i) * 0.01)
+        }
+        XCTAssertEqual(r.dropDockControlUntil, 0, "the Mac's three-finger swipes are left alone")
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.2)
+        XCTAssertEqual(phases, [])
+    }
+
+    func testFourFingersLeftAfterFiveDontPan() {
+        var r = TrackpadRecognizer()
+        var phases: [TrackpadPan.Phase] = []
+        phases += r.update(device: 1, fingers: [1, 2, 3, 4, 5], centroid: CGPoint(x: 0.5, y: 0.5), now: 0)
+        for (i, p) in line(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.9, y: 0.5)).enumerated() {
+            phases += r.update(device: 1, fingers: four, centroid: p, now: 0.05 + Double(i) * 0.01)
+        }
+        phases += r.update(device: 1, fingers: [], centroid: .zero, now: 0.4)
+        XCTAssertEqual(phases, [])
+    }
+
     func testAPanWithTheHandHeldTheSameStillPans() {
         var r = TrackpadRecognizer()
         var phases: [TrackpadPan.Phase] = []

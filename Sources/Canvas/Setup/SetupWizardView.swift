@@ -490,15 +490,15 @@ struct TourTable: View {
     var scale: CGFloat
     private var s: CGFloat { scale }
 
-    static let rows: [(String, String)] = [
-        ("Canvas ↔ last window", "four-finger tap  ·  Mission Control key"),
+    static var rows: [(String, String)] { [
+        ("Canvas ↔ last window", "\(Settings.panFingers.word)-finger tap  ·  Mission Control key"),
         ("Enter a window", "click  ·  ⏎"),
-        ("Zoom and pan", "pinch  ·  ⌥ or ⌘ scroll  ·  four-finger drag"),
+        ("Zoom and pan", "pinch  ·  ⌥ or ⌘ scroll  ·  \(Settings.panFingers.word)-finger drag"),
         ("Place windows", "⌃⌥ keys: one window, one screen, everything"),
         ("Learn the rest", "Instructions, in the sun icon’s More  ·  ⌘?"),
         ("Save and restore layouts", "⌘S  ·  ⌘1 – ⌘9"),
         ("Everything else", "the sun icon in the menu bar"),
-    ]
+    ] }
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 28 * s, verticalSpacing: 10 * s) {

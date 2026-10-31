@@ -9,10 +9,10 @@ final class GestureGuideTests: XCTestCase {
         let withSwipe = GestureGuide.Group.allCases.flatMap { $0.gestures(seeAll: .swipeUp) }
         XCTAssertEqual(Set(withTap).union(withSwipe), Set(Gesture.allCases))
         XCTAssertEqual(withTap.count, Gesture.allCases.count - 1)
-        XCTAssertTrue(withTap.contains(.fourFingerTap))
+        XCTAssertTrue(withTap.contains(.handTap))
         XCTAssertFalse(withTap.contains(.swipeUp))
         XCTAssertTrue(withSwipe.contains(.swipeUp))
-        XCTAssertFalse(withSwipe.contains(.fourFingerTap))
+        XCTAssertFalse(withSwipe.contains(.handTap))
         XCTAssertTrue(GestureGuide.Group.allCases.allSatisfy { !$0.gestures(seeAll: .tap).isEmpty })
     }
 
@@ -28,6 +28,26 @@ final class GestureGuideTests: XCTestCase {
                 XCTAssertTrue((0...1).contains(frame.touch), "\(gesture) at \(t)")
                 XCTAssertTrue((0...1).contains(frame.opacity), "\(gesture) at \(t)")
             }
+        }
+    }
+
+    func testWithThreeFingersChosenTheHandAndItsWordsHaveThree() async {
+        await MainActor.run {
+            let defaults = UserDefaults.standard
+            let saved = defaults.object(forKey: "CanvasPanFingers")
+            defer { defaults.set(saved, forKey: "CanvasPanFingers") }
+            Settings.panFingers = .three
+            for gesture in [Gesture.handDrag, .handTap, .swipeUp] {
+                XCTAssertEqual(gesture.fingers, 3)
+                XCTAssertEqual(GestureGuide.frame(for: gesture, at: gesture.still).fingers.count, 3, "\(gesture)")
+                XCTAssertTrue(gesture.how.contains("three fingers"), gesture.how)
+            }
+            XCTAssertEqual(GestureGuide.frame(for: .spread, at: Gesture.spread.still).fingers.count, 4, "thumb and three")
+            XCTAssertEqual(Settings.SeeAllGesture.tap.title, "Three-finger tap")
+            XCTAssertTrue(Manual.gettingAround.contains { $0.how.contains("three-finger drag") })
+            Settings.panFingers = .four
+            XCTAssertEqual(Gesture.handDrag.fingers, 4)
+            XCTAssertEqual(Gesture.handTap.how, "Tap with four fingers")
         }
     }
 
@@ -52,12 +72,12 @@ final class GestureGuideTests: XCTestCase {
     }
 
     func testFourFingerTapStaysPutAndOpensOutToEverything() {
-        let before = GestureGuide.frame(for: .fourFingerTap, at: 0.5)
-        let down = GestureGuide.frame(for: .fourFingerTap, at: 1.0)
+        let before = GestureGuide.frame(for: .handTap, at: 0.5)
+        let down = GestureGuide.frame(for: .handTap, at: 1.0)
         XCTAssertEqual(down.fingers[0], before.fingers[0])
         XCTAssertGreaterThan(down.touch, 0.9)
         XCTAssertEqual(before.camera, .entered)
-        XCTAssertEqual(GestureGuide.frame(for: .fourFingerTap, at: 2.2).camera, .overview)
+        XCTAssertEqual(GestureGuide.frame(for: .handTap, at: 2.2).camera, .overview)
     }
 
     func testSwipeUpGoesUpTheTrackpadAndOutToEverything() {
@@ -69,8 +89,8 @@ final class GestureGuideTests: XCTestCase {
     }
 
     func testFourFingerDragIsNotStraightUp() {
-        let a = GestureGuide.frame(for: .fourFingerDrag, at: 1.0).fingers[0]
-        let b = GestureGuide.frame(for: .fourFingerDrag, at: 2.6).fingers[0]
+        let a = GestureGuide.frame(for: .handDrag, at: 1.0).fingers[0]
+        let b = GestureGuide.frame(for: .handDrag, at: 2.6).fingers[0]
         XCTAssertGreaterThan(b.y, a.y, "down the trackpad, never up")
     }
 

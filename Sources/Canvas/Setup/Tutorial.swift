@@ -53,17 +53,17 @@ enum Tutorial {
         /// The step with See All shown the way Settings › Trackpad has it (the tap by default).
         func resolved(seeAll: Settings.SeeAllGesture) -> Step {
             var step = self
-            if gesture == .fourFingerTap || gesture == .swipeUp {
-                step.gesture = seeAll == .tap ? .fourFingerTap : .swipeUp
+            if gesture == .handTap || gesture == .swipeUp {
+                step.gesture = seeAll == .tap ? .handTap : .swipeUp
             }
             return step
         }
     }
 
-    static let trackpad: [Step] = [
+    static var trackpad: [Step] { [
         Step(title: "See all your windows.",
              line: "Every window sits on one big canvas. From anywhere, even inside a window, one move brings all of it into view.",
-             gesture: .fourFingerTap, keys: "the Mission Control key"),
+             gesture: .handTap, keys: "the Mission Control key"),
         Step(title: "Pan around.",
              line: "The canvas goes on in every direction. Slide two fingers over it to move about.",
              gesture: .scroll, keys: "drag the empty canvas"),
@@ -80,15 +80,15 @@ enum Tutorial {
              line: "Drag a window anywhere on the canvas. Its edges stick to the neighbours', so things line up.",
              gesture: .drag, keys: "⌃⌥ and an arrow for halves, thirds and more"),
         Step(title: "Pan from anywhere.",
-             line: "Drag four fingers in any direction, even inside a window: the canvas comes back and follows them.",
-             gesture: .fourFingerDrag),
-    ]
+             line: "Drag \(Settings.panFingers.word) fingers in any direction, even inside a window: the canvas comes back and follows them.",
+             gesture: .handDrag),
+    ] }
 
-    /// With a mouse there are no four fingers, so the steps are the trackpad's without that one.
+    /// With a mouse there's no drag of several fingers, so the steps are the trackpad's without that one.
     static let mouse: [Step] = [
         Step(title: "See all your windows.",
              line: "Every window sits on one big canvas. From anywhere, even inside a window, one key brings all of it into view.",
-             gesture: .fourFingerTap, mouse: MouseCue(how: "Press the Mission Control key", keys: ["F3"], showsMouse: false)),
+             gesture: .handTap, mouse: MouseCue(how: "Press the Mission Control key", keys: ["F3"], showsMouse: false)),
         Step(title: "Pan around.",
              line: "The canvas goes on in every direction. Scroll to move up and down; hold ⇧ to go sideways.",
              gesture: .scroll, mouse: MouseCue(how: "Scroll, with ⇧ for sideways", keys: ["⇧"], wheel: .pan),

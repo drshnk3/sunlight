@@ -32,10 +32,10 @@ final class TutorialTests: XCTestCase {
     /// Both teach the same moves in the same order: see everything first, then the click that goes into a
     /// window, before moving one. The mouse only lacks the four-finger pan.
     func testBothTeachTheSameMovesClickBeforeDrag() {
-        XCTAssertEqual(Tutorial.trackpad.filter { $0.gesture != .fourFingerDrag }.map(\.title), Tutorial.mouse.map(\.title))
+        XCTAssertEqual(Tutorial.trackpad.filter { $0.gesture != .handDrag }.map(\.title), Tutorial.mouse.map(\.title))
         for input in Tutorial.Input.allCases {
             let gestures = input.steps.map(\.gesture)
-            XCTAssertEqual(gestures.first, .fourFingerTap, "\(input)")
+            XCTAssertEqual(gestures.first, .handTap, "\(input)")
             XCTAssertEqual(input.steps[0].resolved(seeAll: .swipeUp).gesture, .swipeUp, "\(input)")
             XCTAssertEqual(input.steps[1].resolved(seeAll: .swipeUp).gesture, input.steps[1].gesture, "\(input)")
             let click = gestures.firstIndex(of: .click)
@@ -61,9 +61,9 @@ final class TutorialTests: XCTestCase {
         let click = Tutorial.trackpad.first { $0.gesture == .click }
         XCTAssertEqual(click?.also, .pinchIn)
         XCTAssertTrue(Tutorial.mouse.allSatisfy { $0.also == nil }, "a mouse can't pinch")
-        let pan = Tutorial.trackpad.firstIndex { $0.gesture == .fourFingerDrag }
+        let pan = Tutorial.trackpad.firstIndex { $0.gesture == .handDrag }
         XCTAssertNotNil(pan)
         if let pan { XCTAssertGreaterThanOrEqual(pan, Tutorial.trackpad.count - 2) }
-        XCTAssertFalse(Tutorial.mouse.contains { $0.gesture == .fourFingerDrag })
+        XCTAssertFalse(Tutorial.mouse.contains { $0.gesture == .handDrag })
     }
 }

@@ -1,46 +1,49 @@
 import AppKit
 import os
 
-/// Four-finger drag pans the canvas from anywhere: on the canvas, over windows too (where a one-finger
-/// drag would move them), and from inside an entered window, which brings the canvas back first. No
-/// modifier, no key first, and every direction pans, up included. A four-finger *tap* (four fingers
-/// down and up again without moving) shows everything, as Mission Control's swipe does; or, by
-/// Settings › Trackpad, a quick four-finger *flick* up does, Mission Control's own stroke, told from a
-/// drag up by its speed as the Mac tells them apart (swiped up slowly, Mission Control follows the
-/// fingers instead of opening). Thumb and three fingers spreading apart is Show Desktop, as on the Mac.
+/// A four-finger drag (or three, by Settings › Trackpad, as the Mac's own swipes come) pans the canvas
+/// from anywhere: on the canvas, over windows too (where a one-finger drag would move them), and from
+/// inside an entered window, which brings the canvas back first. No modifier, no key first, and every
+/// direction pans, up included. A *tap* of the same fingers (down and up again without moving) shows
+/// everything, as Mission Control's swipe does; or, by Settings › Trackpad, a quick *flick* up does,
+/// Mission Control's own stroke, told from a drag up by its speed as the Mac tells them apart (swiped
+/// up slowly, Mission Control follows the fingers instead of opening). Thumb and three fingers
+/// spreading apart is Show Desktop, as on the Mac, whichever count drags.
 ///
 /// The touches come straight from the trackpad through MultitouchSupport, the private framework Mac
 /// gesture tools read (MiddleClick, BetterTouchTool). There's no public route: AppKit only hands touches
 /// to a view under the pointer, and the gesture events an event tap sees carry none. It needs no
 /// permission.
 ///
-/// The system reads the same four fingers as a Mission Control or Spaces swipe and drives the Dock with
+/// The system reads the same fingers as a Mission Control or Spaces swipe and drives the Dock with
 /// Dock-control events. A session event tap (Accessibility, on its own thread like `KeyTap`) drops those
-/// while four fingers are down, so the drag pans and does nothing else. That takes the four-finger pinch
-/// (Launchpad) with it; five fingers are left alone.
+/// while the drag's fingers (or the spread's four) are down, so the drag pans and does nothing else.
+/// That takes the four-finger pinch (Launchpad) with it; five fingers are left alone. Three-finger drag
+/// (Accessibility) and Look Up's three-finger tap aren't Dock control: with three fingers chosen they
+/// still happen too (`Settings.threeFingerClashes`).
 final class TrackpadPan: @unchecked Sendable {
     enum Phase: Sendable, Equatable {
         case began
         /// Finger travel since the last update, in trackpad widths, y down. The content follows it.
         case changed(CGVector)
         case ended
-        /// A four-finger tap, as the fingers lift; or a flick up, mid-drag, after which the pan is over
+        /// A tap of the drag's fingers, as they lift; or a flick up, mid-drag, after which the pan is over
         /// with no `ended` to follow.
         case seeAll
-        /// The four fingers spread apart (Show Desktop), once per touch. No pan comes with it.
+        /// Thumb and three fingers spread apart (Show Desktop), once per touch. No pan comes with it.
         case spread
     }
 
-    /// Centroid travel, in trackpad widths, before four fingers on the trackpad count as a drag. Keeps
-    /// a four-finger tap or pinch from moving anything.
+    /// Centroid travel, in trackpad widths, before the fingers on the trackpad count as a drag. Keeps
+    /// a tap or pinch from moving anything.
     fileprivate static let slop: CGFloat = 0.02
     /// A drag that starts within this angle of horizontal stays level until the fingers lift. No
-    /// four-finger drag is ever quite level, and sweeping along a row of windows shouldn't creep up or
+    /// trackpad drag is ever quite level, and sweeping along a row of windows shouldn't creep up or
     /// down (a window's top under the menu bar can't be entered where it is). One within this angle of
     /// vertical stays plumb the same way.
     fileprivate static let axisLock: CGFloat = 22.5 * .pi / 180
-    /// A tap's or flick's four fingers land together: the fourth within this long of the first. A
-    /// finger that joins a three-finger tap (Look Up) or swipe (back, forward) later never makes one.
+    /// A tap's or flick's fingers land together: the last within this long of the first. A
+    /// finger that joins a smaller tap (Look Up) or swipe (back, forward) later never makes one.
     fileprivate static let tapLanding: CFAbsoluteTime = 0.15
     /// Centroid rise, in trackpad widths, that makes an upward drag a flick. About two centimetres on
     /// a built-in trackpad: a short stroke, not a shifting hand.
@@ -73,7 +76,7 @@ final class TrackpadPan: @unchecked Sendable {
     /// Owns the devices; they're released with it.
     private var deviceList: CFArray?
     private var wakeToken: NSObjectProtocol?
-    private var settingToken: NSObjectProtocol?
+    private var settingTokens: [NSObjectProtocol] = []
 
     // Tap thread.
     private var thread: Thread?
@@ -86,12 +89,12 @@ final class TrackpadPan: @unchecked Sendable {
     @MainActor func start() {
         guard thread == nil else { return }
         TrackpadPan.shared = self
-        // Settings is the main actor's; the recognizer keeps its own copy of the one choice it needs.
-        followSetting()
-        settingToken = NotificationCenter.default.addObserver(
-            forName: Settings.seeAllGestureDidChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.followSetting() }
+        // Settings is the main actor's; the recognizer keeps its own copy of the choices it needs.
+        followSettings()
+        settingTokens = [Settings.seeAllGestureDidChange, Settings.panFingersDidChange].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.followSettings() }
+            }
         }
         startDevices()
         // The trackpad stops reporting across sleep; start over with whatever is attached on wake.
@@ -108,16 +111,24 @@ final class TrackpadPan: @unchecked Sendable {
         t.start()
     }
 
-    @MainActor private func followSetting() {
+    @MainActor private func followSettings() {
         let swipeUp = Settings.seeAllGesture == .swipeUp
-        state.withLock { $0.swipeUpSeesAll = swipeUp }
+        let count = Settings.panFingers.rawValue
+        let phases = state.withLock { s -> [Phase] in
+            s.swipeUpSeesAll = swipeUp
+            guard s.fingerCount != count else { return [] }
+            // A touch under way was read with the old count; let it go.
+            s.fingerCount = count
+            return s.reset()
+        }
+        phases.forEach(send)
     }
 
     // MARK: Touches
 
     private func startDevices() {
         guard let mt else {
-            NSLog("TrackpadPan: MultitouchSupport unavailable, four-finger pan is off")
+            NSLog("TrackpadPan: MultitouchSupport unavailable, trackpad pan is off")
             return
         }
         guard let list = mt.createList()?.takeRetainedValue() else {
@@ -253,17 +264,17 @@ final class TrackpadPan: @unchecked Sendable {
     }
 }
 
-/// The four-finger drag, tap and spread, fed one trackpad frame at a time.
+/// The drag and tap (three or four fingers, `fingerCount`) and the spread, fed one trackpad frame at a time.
 struct TrackpadRecognizer {
     /// Height over width of each device's surface, keyed by device.
     var heightPerWidth: [UInt: CGFloat] = [:]
     /// The device being followed (a Magic Mouse reports through the same framework).
     var device: UInt?
-    /// The four contacts being followed.
+    /// The contacts being followed: the drag's fingers, or the spread's four.
     var fingers: Set<Int32> = []
-    /// Where their centroid was when the fourth one landed; nil once the drag has begun.
+    /// Where their centroid was when the last of them landed; nil once the drag has begun.
     var anchor: CGPoint?
-    /// Their mean distance from the centroid when the fourth one landed: a spread grows it.
+    /// Their mean distance from the centroid when the last of them landed: a spread grows it.
     var anchorSpread: CGFloat = 0
     /// The centroid at the previous frame while dragging.
     var last: CGPoint?
@@ -283,26 +294,37 @@ struct TrackpadRecognizer {
     enum Lock { case level, plumb }
     /// When the first finger of this touch landed; nil with no finger down.
     var touchBegan: CFAbsoluteTime?
-    /// The four fingers landed together (`tapLanding`), so lifting them again soon may be a tap.
+    /// The fingers landed together (`tapLanding`), so lifting them again soon may be a tap.
     var landedTogether = false
-    /// From four fingers landing until the last one lifts: the system's swipe lasts that long, however
-    /// many fingers stay down.
-    var fourFingerTouch = false
+    /// From the gesture's fingers landing until the last one lifts: the system's swipe lasts that long,
+    /// however many fingers stay down.
+    var gestureTouch = false
     /// Read by the event tap.
     var dropDockControlUntil: CFAbsoluteTime = 0
+    /// Settings › Trackpad: the fingers that drag, tap and flick, three or four. Show Desktop's spread
+    /// is thumb and three fingers, four contacts, either way.
+    var fingerCount = 4
+    /// The most fingers down at once this touch. A touch that had more than the drag's fingers (a
+    /// spread, with three; five, with four) never drags or taps as fingers lift back to that many.
+    var peak = 0
 
     /// `spread` is the fingers' mean distance from `centroid`, in trackpad widths.
     mutating func update(device: UInt, fingers ids: Set<Int32>, centroid: CGPoint, spread: CGFloat = 0,
                          now: CFAbsoluteTime) -> [TrackpadPan.Phase] {
         if let followed = self.device, followed != device { return [] }
-        if ids.count == 4 { fourFingerTouch = true } else if ids.isEmpty { fourFingerTouch = false }
-        if fourFingerTouch { dropDockControlUntil = now + TrackpadPan.dockTail }
+        peak = ids.isEmpty ? 0 : max(peak, ids.count)
+        // The Dock reads three- and four-finger swipes, whichever the Mac is set to: with three
+        // fingers chosen, both are Sunlight's (four for the spread).
+        if ids.count == fingerCount || ids.count == 4 { gestureTouch = true } else if ids.isEmpty { gestureTouch = false }
+        if gestureTouch { dropDockControlUntil = now + TrackpadPan.dockTail }
         let began = touchBegan ?? now
         if ids.isEmpty { touchBegan = nil } else if touchBegan == nil { touchBegan = now }
-        // A finger landed or lifted: whatever was under way is over. Four fingers that landed together,
-        // never moved and lift again at once were a tap.
-        guard ids.count == 4 else {
-            let tap = !swipeUpSeesAll && ids.count < 4 && fingers.count == 4 && last == nil && !swiped
+        let drags = ids.count == fingerCount && peak == fingerCount
+        let spreads = ids.count == 4 && peak == 4
+        // A finger landed or lifted: whatever was under way is over. The drag's fingers that landed
+        // together, never moved and lift again at once were a tap.
+        guard drags || spreads else {
+            let tap = !swipeUpSeesAll && ids.count < fingerCount && fingers.count == fingerCount && last == nil && !swiped
                 && !stirred && landedTogether && now - began <= TrackpadPan.tapDuration
             return reset() + (tap ? [.seeAll] : [])
         }
@@ -322,10 +344,12 @@ struct TrackpadRecognizer {
             // Before a drag begins, fingers moving apart (or together) more than the hand moves is a
             // spread (or Launchpad's pinch), not a pan.
             let grown = spread - anchorSpread
-            if grown >= TrackpadPan.spreadDistance {
+            if spreads, grown >= TrackpadPan.spreadDistance {
                 swiped = true
                 return [.spread]
             }
+            // With three fingers chosen, four on the trackpad only ever spread.
+            guard drags else { return [] }
             if abs(grown) >= TrackpadPan.slop || hypot(travel.dx, travel.dy) >= TrackpadPan.slop { stirred = true }
             // Spreading fingers shift the centroid too (the thumb moves furthest); while the spread keeps
             // up with the shift, the touch is still undecided.

@@ -37,17 +37,20 @@ enum Manual {
     }
 
     /// The canvas in a few lines, in the order you'd learn it.
-    static let gettingAround: [Row] = [
-        Row(title: "See everything", how: "four-finger tap (or swipe up: Settings › Trackpad)"),
-        Row(title: "Zoom", how: "pinch · ⌥ or ⌘ scroll"),
-        Row(title: "Pan", how: "two-finger scroll · drag the empty canvas"),
-        Row(title: "Go into a window", how: "click · pinch in over it"),
-        Row(title: "Bring a window to the middle", how: "double-click · ⏎ over it"),
-        Row(title: "Use a window at 1:1", how: "click, as on the desktop"),
-        Row(title: "Canvas ↔ last window", how: "Mission Control key · four-finger tap"),
-        Row(title: "Show Desktop", how: "F11 · four-finger spread"),
-        Row(title: "Pan from anywhere, even inside a window", how: "four-finger drag, any direction"),
-    ]
+    static var gettingAround: [Row] {
+        let n = Settings.panFingers.word
+        return [
+            Row(title: "See everything", how: "\(n)-finger tap (or swipe up: Settings › Trackpad)"),
+            Row(title: "Zoom", how: "pinch · ⌥ or ⌘ scroll"),
+            Row(title: "Pan", how: "two-finger scroll · drag the empty canvas"),
+            Row(title: "Go into a window", how: "click · pinch in over it"),
+            Row(title: "Bring a window to the middle", how: "double-click · ⏎ over it"),
+            Row(title: "Use a window at 1:1", how: "click, as on the desktop"),
+            Row(title: "Canvas ↔ last window", how: "Mission Control key · \(n)-finger tap"),
+            Row(title: "Show Desktop", how: "F11 · four-finger spread"),
+            Row(title: "Pan from anywhere, even inside a window", how: "\(n)-finger drag, any direction"),
+        ]
+    }
 
     /// Where the rest lives.
     static let whereThingsAre: [Row] = [
