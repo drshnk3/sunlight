@@ -3622,6 +3622,11 @@ final class CanvasController {
     private var freeArrangement: PlacementState?
     /// A window was let go in the strip: its new place becomes the order, once, after the drop.
     private var stripDropped: WindowProxy?
+    /// The strip's order on this canvas, column by column, top to bottom. Its own list, not the recency
+    /// list: using a window moves it on the strip only with Recent apps first, and reordering the strip
+    /// doesn't touch ⌘Tab.
+    /// Not saved: a relaunch puts windows back where they were, and their places give the order again.
+    private var stripOrder: [CGWindowID] = []
     /// Windows that `placeRemembered` put back where the last run had them: not new arrivals.
     private var rememberedClaimed: Set<CGWindowID> = []
 
@@ -3650,6 +3655,7 @@ final class CanvasController {
             if on {
                 c.freeArrangement = before
                 for p in c.stripWindows { p.tile = nil }
+                c.adoptStripOrderFromPositions()
                 c.layoutStrip(animated: true, framing: true)
             } else if let free = c.freeArrangement {
                 c.freeArrangement = nil
@@ -3672,9 +3678,21 @@ final class CanvasController {
 
     private func stripItems(_ windows: [WindowProxy]) -> [Strip.Item] {
         windows.map { p in
-            Strip.Item(rect: p.worldRect, app: p.bundleID ?? p.appName, recency: mru.firstIndex(of: p.windowID),
+            Strip.Item(rect: p.worldRect, app: stripApp(p), rank: stripOrder.firstIndex(of: p.windowID),
                        away: p.away != nil)
         }
+    }
+
+    /// What a strip column groups by.
+    private func stripApp(_ p: WindowProxy) -> String { p.bundleID ?? p.appName }
+
+    /// The strip's order covering exactly `windows`: closed windows drop out, and windows without a
+    /// place yet (come back from elsewhere, or there at launch) go after the rest, by where they sit.
+    /// Returns the columns.
+    private func settleStripOrder(_ windows: [WindowProxy]) -> [[Int]] {
+        let columns = Strip.columns(stripItems(windows))
+        adoptStripOrder(columns, of: windows)
+        return columns
     }
 
     /// The first window's top-left: the screen you start on, a gap in from its visible area's corner,
@@ -3688,7 +3706,7 @@ final class CanvasController {
     /// Settings › Windows › Tiling › Gap.
     private var stripGap: CGFloat { Tidy.Spacing.normal.points(gap: Settings.tileGap) }
 
-    /// Every window to its slot on the strip (`Strip`), in the order of the recency list. Windows away
+    /// Every window to its slot on the strip (`Strip`), in the strip's order. Windows away
     /// from the canvas take theirs at once; the rest glide. `framing`: the camera frames the start of the
     /// strip in the same motion. `following`: the camera moves with that window, so it stays where it is
     /// on screen and the strip rearranges around it. Nothing happens unless strip mode is on.
@@ -3696,7 +3714,8 @@ final class CanvasController {
         guard Settings.stripMode, restoring == nil, addingWidgets == nil, !handingOff else { return }
         let windows = stripWindows
         guard !windows.isEmpty else { return }
-        let placed = Strip.layout(stripItems(windows), origin: stripOrigin, gap: stripGap)
+        let columns = settleStripOrder(windows)
+        let placed = Strip.layout(stripItems(windows), columns: columns, origin: stripOrigin, gap: stripGap)
         var moves: [(proxy: WindowProxy, to: CGPoint)] = []
         var placedAtOnce = 0
         for (p, rect) in zip(windows, placed.rects) where p.worldRect.origin != rect.origin {
@@ -3743,27 +3762,50 @@ final class CanvasController {
         layoutStrip(animated: true)
     }
 
-    /// Windows that showed up after launch are the most recent: each takes the front of the strip, its
-    /// app's column moving to the left end with it on top. Windows the last run had, coming back to where
-    /// they were, and those a layout restore is waiting for, aren't new.
+    /// Windows that showed up after launch take their place on the strip (`Strip.adding`): the bottom of
+    /// their app's column, or a new column right after the one last used; nothing else moves. With Recent
+    /// apps first, each takes the front instead, its app's column with it (`Strip.toFront`). Windows the
+    /// last run had, coming back to where they were, and those a layout restore is waiting for, aren't
+    /// new: they keep the place they sit at.
     private func noteStripArrivals(_ created: [WindowProxy], arriving: Bool) {
         guard Settings.stripMode, arriving, restoring == nil else { return }
-        for p in created.reversed() where p.kind == .window && !rememberedClaimed.contains(p.windowID) {
-            mru.removeAll { $0 == p.windowID }
-            mru.insert(p.windowID, at: 0)
+        let new = created.filter { $0.kind == .window && !rememberedClaimed.contains($0.windowID) }
+        guard !new.isEmpty else { return }
+        let newIDs = Set(new.map(\.windowID))
+        let windows = stripWindows.filter { !newIDs.contains($0.windowID) }
+        let apps = Dictionary((windows + new).map { ($0.windowID, stripApp($0)) },
+                              uniquingKeysWith: { a, _ in a })
+        var columns = settleStripOrder(windows).map { $0.map { windows[$0].windowID } }
+        let appOf = { (id: CGWindowID) in apps[id] ?? "" }
+        if Settings.stripRecentFirst {
+            // Reversed, so the first to open ends up first.
+            for p in new.reversed() { columns = Strip.toFront(p.windowID, of: stripApp(p), in: columns, appOf: appOf) }
+        } else {
+            let lastUsed = mru.first { id in windows.contains { $0.windowID == id } }
+            for p in new { columns = Strip.adding(p.windowID, of: stripApp(p), to: columns, appOf: appOf, after: lastUsed) }
         }
+        stripOrder = columns.flatMap { $0 }
     }
 
-    /// The order the strip shows, written into the recency list, so the next layout keeps it: every
-    /// window, column by column, top to bottom.
+    /// Recent apps first: the window just used, and its app's column, take the front of the strip.
+    private func bringToStripFront(_ p: WindowProxy) {
+        guard Settings.stripRecentFirst else { return }
+        let windows = stripWindows
+        guard windows.contains(where: { $0 === p }) else { return }
+        let ids = settleStripOrder(windows).map { $0.map { windows[$0].windowID } }
+        let apps = Dictionary(windows.map { ($0.windowID, stripApp($0)) }, uniquingKeysWith: { a, _ in a })
+        stripOrder = Strip.toFront(p.windowID, of: stripApp(p), in: ids, appOf: { apps[$0] ?? "" }).flatMap { $0 }
+    }
+
+    /// The order the strip shows, kept as the strip's order, so the next layout keeps it: every window,
+    /// column by column, top to bottom.
     private func adoptStripOrder(_ columns: [[Int]], of windows: [WindowProxy]) {
-        let ids = columns.flatMap { $0 }.map { windows[$0].windowID }
-        mru = ids + mru.filter { !ids.contains($0) }
+        stripOrder = columns.flatMap { $0 }.map { windows[$0].windowID }
     }
 
     /// A window let go on the strip: its column goes where it was dropped, past a neighbour once its
     /// middle is past that neighbour's, and it takes its place in the column. That order is the strip's
-    /// from now on, until the next window is used.
+    /// from now on.
     private func stripWindowDropped(_ p: WindowProxy) {
         guard Settings.stripMode else { return }
         let first = stripDropped == nil
@@ -3788,13 +3830,12 @@ final class CanvasController {
     /// The strip in the order the windows sit now, left to right (a layout restored, put on the strip).
     private func adoptStripOrderFromPositions() {
         let windows = stripWindows
-        adoptStripOrder(Strip.columns(stripItems(windows), usingRecency: false), of: windows)
+        adoptStripOrder(Strip.columns(stripItems(windows), usingRanks: false), of: windows)
     }
 
     /// ⌃⌥ arrows in strip mode: into the window beside the one in use (or, on the canvas, the one under
     /// the pointer or used last), ← → the next app's column, ↑ ↓ along the column. From inside a real
-    /// window the canvas comes forward first and the strip keeps its order while you step, so ⌃⌥→ twice
-    /// goes two columns along; it reorders the next time you come back to the canvas yourself.
+    /// window the canvas comes forward first.
     func stepStrip(_ direction: Strip.Direction) {
         guard restoring == nil, addingWidgets == nil, !handingOff else { return }
         guard NSApp.isActive else {
@@ -4797,12 +4838,14 @@ final class CanvasController {
         env?.watcher.stopObserving()
         leaveEntered(reconcile: true)
         desktopFloor.noteReturn()
-        // Strip mode: the window you were in, and its app's column, go to the left end of the strip. The
-        // camera moves with it, so it stays where it is on screen and the strip rearranges around it. Not
-        // while something asked from the window is about to move the camera (the switcher, a pan, Show
-        // Desktop, a ⌃⌥ arrow step): the strip keeps its order for that, and reorders on the next return.
+        // Strip mode: the strip closes up or makes room for what changed while you were in the window (a
+        // window resized, closed or opened); with Recent apps first, the window you were in and its
+        // app's column also go to the left end. The camera moves with that window, so it stays where it
+        // is on screen. Not while something asked from the window is about to move the camera (the
+        // switcher, a pan, Show Desktop, a ⌃⌥ arrow step): the strip keeps its order for that.
         if Settings.stripMode, pendingSwitcherMoves.isEmpty, !pendingSwitcherCommit, pendingPan == nil,
            !pendingShowDesktop, pendingPlacement == nil {
+            if let wasIn { bringToStripFront(wasIn) }
             layoutStrip(animated: true, following: wasIn)
         }
         applyPendingSwitcher()
@@ -5897,13 +5940,20 @@ final class CanvasController {
     private func adopt(_ p: WindowProxy, ax: AXWindow, real: CGRect) {
         NSLog("Absorb: \(p.appName) — \(p.title) at \(real.integral)")
         clearPending()
-        liftWindow(p)
         view.bringToFront(p)
         p.ax = ax
         p.placedNatively(at: real)
-        // Instant, not animated: the real window already covers its proxy.
-        view.set(camera: cameraAligning(p, with: real))
+        // Entered before the camera moves, and lifted after: a camera change with no window entered sends
+        // the add-on a frame at once (`cameraChanged`), and a full frame re-levels every window. Lifted
+        // first, the window went straight back under the canvas, which stays up above the apps
+        // (sunlight-27): the app in front, the canvas empty. Entered, no frame goes out.
         enter(p, realFrame: real, activateApp: false)
+        // Instant, not animated: the real window already covers its proxy. `enter` noted the camera it
+        // was entered at before this one; it's this one.
+        view.set(camera: cameraAligning(p, with: real))
+        enteredCamera = view.camera
+        lastOneToOne = view.camera
+        liftWindow(p)
     }
 
     /// Focus moved to another window of the entered app (⌘`, a click on a sibling, ⌘N): it becomes

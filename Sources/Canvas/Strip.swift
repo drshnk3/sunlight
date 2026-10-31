@@ -2,10 +2,11 @@ import CoreGraphics
 import Foundation
 
 /// Strip mode (Window › Strip Mode, ⌃⌥S): every window on one endless horizontal strip, one column per
-/// app, the app used last on the left and each one used before it further right. Inside a column the
-/// app's windows are stacked top to bottom, the one used last on top. World coordinates throughout
-/// (top-left origin, points). Pure: items in, columns and rects out; the controller gathers the
-/// windows, keeps the recency list and animates.
+/// app, the app's windows stacked top to bottom inside it. The order is fixed: using a window never
+/// moves it. It changes when the user drags a window to a new place, and when a window opens (`adding`).
+/// With Settings › Canvas › Recent apps first, a window used or opened takes the front (`toFront`).
+/// World coordinates throughout (top-left origin, points). Pure: items in, columns and rects out; the
+/// controller gathers the windows, keeps the strip's order and animates.
 enum Strip {
     /// One window on the strip.
     struct Item: Equatable {
@@ -13,8 +14,8 @@ enum Strip {
         var rect: CGRect
         /// What a column groups by: the app's bundle ID, or its name.
         var app: String
-        /// Place in the recency list, 0 the most recent; nil when never used.
-        var recency: Int?
+        /// Place in the strip's order, 0 the first; nil when it has none yet.
+        var rank: Int?
         /// Hidden or minimized: it keeps its slot, so nothing shifts when it comes back, but the arrow
         /// keys skip it.
         var away = false
@@ -26,18 +27,18 @@ enum Strip {
 
     /// The columns, left to right, each a list of item indices top to bottom.
     ///
-    /// With `usingRecency` an app's column goes by its most recently used window and a column by its
-    /// windows' recency; apps and windows never used come after, in the order they sit now (left to
-    /// right, top to bottom). Without it, only where they sit counts: the order a layout restore or a
-    /// relaunch put them in.
-    static func columns(_ items: [Item], usingRecency: Bool = true) -> [[Int]] {
+    /// With `usingRanks` an app's column goes by its first-ranked window and a column by its windows'
+    /// ranks; windows without a rank come after, in the order they sit now (left to right, top to
+    /// bottom). Without it, only where they sit counts: the order a layout restore or a relaunch put
+    /// them in, or the free canvas when strip mode comes on.
+    static func columns(_ items: [Item], usingRanks: Bool = true) -> [[Int]] {
         var byApp: [String: [Int]] = [:]
         var apps: [String] = []
         for i in items.indices {
             if byApp[items[i].app] == nil { apps.append(items[i].app) }
             byApp[items[i].app, default: []].append(i)
         }
-        func rank(_ i: Int) -> Int { usingRecency ? items[i].recency ?? Int.max : Int.max }
+        func rank(_ i: Int) -> Int { usingRanks ? items[i].rank ?? Int.max : Int.max }
         var columns = apps.map { app in
             byApp[app, default: []].sorted { a, b in
                 let ra = rank(a), rb = rank(b)
@@ -120,6 +121,34 @@ enum Strip {
             placed.insert(dropped, at: at)
             return placed
         }
+    }
+
+    /// The order once window `new` of `app` has opened: at the bottom of its app's column when the app
+    /// has one, otherwise in a column of its own right after the column holding `lastUsed` (the end of
+    /// the strip when that's nil or not on it). No other column moves. `appOf` names each window's app.
+    static func adding<ID: Equatable>(_ new: ID, of app: String, to columns: [[ID]], appOf: (ID) -> String,
+                                      after lastUsed: ID?) -> [[ID]] {
+        var columns = columns
+        if let c = columns.firstIndex(where: { $0.contains { appOf($0) == app } }) {
+            columns[c].append(new)
+        } else if let lastUsed, let c = columns.firstIndex(where: { $0.contains(lastUsed) }) {
+            columns.insert([new], at: c + 1)
+        } else {
+            columns.append([new])
+        }
+        return columns
+    }
+
+    /// The order once window `id` of `app` was used or opened, with recent apps first: its app's column
+    /// moves to the left end with it on top, or it starts a column there when its app has none. The
+    /// other columns keep their order.
+    static func toFront<ID: Equatable>(_ id: ID, of app: String, in columns: [[ID]], appOf: (ID) -> String) -> [[ID]] {
+        var columns = columns.map { $0.filter { $0 != id } }
+        var column = [id]
+        if let c = columns.firstIndex(where: { $0.contains { appOf($0) == app } }) {
+            column += columns.remove(at: c)
+        }
+        return [column] + columns.filter { !$0.isEmpty }
     }
 
     /// The window the arrow keys go to from `item`: ← → the top window of the next column on that side

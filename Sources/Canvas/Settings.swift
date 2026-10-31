@@ -391,8 +391,9 @@ enum Settings {
     private static let stripModeKey = "CanvasStripMode"
 
     /// Window › Strip Mode (⌃⌥S), also Settings › Canvas: every window on one horizontal strip, one
-    /// column per app, the one used last on the left (see `Strip`). While it's on, dragging has no guides,
-    /// grid or pushing, and the ⌃⌥ arrows step along the strip. Off by default.
+    /// column per app, in an order that stays put or follows use (`stripRecentFirst`, `Strip`). While
+    /// it's on, dragging has no guides, grid or pushing, and the ⌃⌥ arrows step along the strip. Off by
+    /// default.
     /// Never on while the feature is off (`stripModeEnabled`), whatever was stored before.
     static var stripMode: Bool {
         get { stripModeEnabled && defaults.bool(forKey: stripModeKey) }
@@ -402,6 +403,17 @@ enum Settings {
     /// Posted by the Settings toggle with the wanted state as the object (an `NSNumber`): the canvas
     /// does the switch, animated and undoable, as the menu item does.
     static let stripModeRequested = Notification.Name("CanvasStripModeRequested")
+
+    private static let stripRecentFirstKey = "CanvasStripRecentFirst"
+
+    /// Strip mode orders by use: the window you come back to the canvas from, or one that just opened,
+    /// takes the left end of the strip with its app's column (`Strip.toFront`). Off, the order stays
+    /// put and a new window joins its app's column or opens beside the one you were using
+    /// (`Strip.adding`). Off by default.
+    static var stripRecentFirst: Bool {
+        get { defaults.bool(forKey: stripRecentFirstKey) }
+        set { defaults.set(newValue, forKey: stripRecentFirstKey) }
+    }
 
     // MARK: The minimap
 
@@ -1230,7 +1242,11 @@ private struct CanvasPane: View {
                     })) {
                         RowLabel(title: "Strip mode",
                                  subtitle: "Every app on one endless horizontal strip. ⌃⌥S, or Window › Strip Mode.",
-                                 info: "Each app’s windows stack in a column: the app used last on the left, each one before it further right. The ⌃⌥ arrows step along the strip.")
+                                 info: "Each app’s windows stack in a column. Drag a window to reorder the strip. The ⌃⌥ arrows step along the strip.")
+                    }
+                    Toggle(isOn: model.bind({ Settings.stripRecentFirst }, { Settings.stripRecentFirst = $0 })) {
+                        RowLabel(title: "Recent apps first",
+                                 subtitle: "The app you used last moves to the left end of the strip. Off, the strip keeps its order and a new app opens beside the one you were using.")
                     }
                 }
                 Toggle(isOn: model.bind({ Settings.showMinimap }, { model.setMinimap($0) })) {
