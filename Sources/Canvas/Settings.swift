@@ -359,6 +359,20 @@ enum Settings {
         set { defaults.set(newValue, forKey: rememberCanvasKey) }
     }
 
+    private static let ownsMenuBarKey = "CanvasOwnsMenuBar"
+    static let ownsMenuBarDidChange = Notification.Name("SunlightOwnsMenuBarDidChange")
+
+    /// Settings › General › "Sunlight's menu bar on the canvas": while the canvas is in front, the menu
+    /// bar is Sunlight's own, so a click in it (Wi-Fi, the clock, any menu) stays on the canvas rather than
+    /// bringing the last app forward (see `MenuBarOwnership`). Sunlight has a Dock icon meanwhile. On by default.
+    static var ownsMenuBar: Bool {
+        get { defaults.object(forKey: ownsMenuBarKey) as? Bool ?? true }
+        set {
+            defaults.set(newValue, forKey: ownsMenuBarKey)
+            NotificationCenter.default.post(name: ownsMenuBarDidChange, object: nil)
+        }
+    }
+
     private static let sunlightOnKey = "SunlightOn"
 
     /// The menu bar's Sunlight switch. Off, the canvas is away and the keys are the Mac's own, until
@@ -1139,6 +1153,10 @@ private struct GeneralPane: View {
                               detail: "Sunlight takes the place of the Dock, ⌘Tab, Mission Control and Show Desktop, and opens at login. Turning it off puts them back and quits Sunlight.")
             }
             Section {
+                Toggle(isOn: model.bind({ Settings.ownsMenuBar }, { Settings.ownsMenuBar = $0 })) {
+                    RowLabel(title: "Sunlight's menu bar on the canvas",
+                             subtitle: "On the canvas the menu bar is Sunlight's, and clicking it (Wi-Fi, the clock, a menu) keeps you there. Off, it's the last app's, and a click in it goes back into that app. Sunlight shows in the Dock while the canvas is in front.")
+                }
                 Toggle(isOn: model.bind({ Settings.rememberCanvas }, { Settings.rememberCanvas = $0 })) {
                     RowLabel(title: "Remember the canvas",
                              subtitle: "Where every window sits, the zoom and the background come back next launch.")

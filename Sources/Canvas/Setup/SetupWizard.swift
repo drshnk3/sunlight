@@ -302,12 +302,8 @@ final class SetupWizardController: NSWindowController, NSWindowDelegate {
     /// brings the window forward (`showWindow`). Not in the tour, which stays out of sight.
     private func dockIcon(_ shown: Bool) {
         guard !isTour else { return }
-        let policy: NSApplication.ActivationPolicy = shown ? .regular : .accessory
-        guard NSApp.activationPolicy() != policy else { return }
-        let wasActive = NSApp.isActive
-        NSApp.setActivationPolicy(policy)
-        // Going back to accessory can deactivate the app: the canvas the window closed onto stays in front.
-        if !shown, wasActive { NSApp.activate() }
+        // The canvas may want Sunlight regular too (its own menu bar): `MenuBarOwnership` decides for both.
+        MenuBarOwnership.setupShown = shown
     }
 
     private func stopWatching() {

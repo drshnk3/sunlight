@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         updater = Updater()
         updater?.onFoundUpdate = { [weak self] version in self?.menuBar?.model.updateVersion = version }
         installMenu()
+        MenuBarOwnership.start()
 
         let canvas = Desk()
         self.canvas = canvas
@@ -255,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func setSunlightOn(_ on: Bool) {
         guard on != Settings.sunlightOn || canvas?.paused == on else { return }
         Settings.sunlightOn = on
+        MenuBarOwnership.update()
         if on {
             if let canvas, tileHotkeys.isEmpty { installHotkeys(for: canvas) }
             takeover?.resumeInput()
