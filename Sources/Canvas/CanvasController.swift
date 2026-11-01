@@ -93,6 +93,21 @@ final class CanvasController {
     /// The view camera the entered window's app was placed at (`enter`): what its windows' native frames
     /// are read against on the way back, whatever the camera is doing by then.
     private var enteredCamera: Camera?
+    /// The window entered before the one entered now, and when it was left: closing the window in use
+    /// makes macOS focus another (often another app's) a moment before the window server reports the
+    /// close, so the close is still that window's (`closeUpAfterEnteredClose`).
+    private var leftWindow: (id: CGWindowID, at: CFTimeInterval)?
+    /// Until when an app coming forward is the strip close-up's doing (`foreignActivation`).
+    private var closingUpUntil = Date.distantPast
+    /// How long a window reported off the screen may take to be destroyed by its app before it's taken
+    /// to be away instead (`closeUpAfterEnteredClose`).
+    static let closeConfirmWait: CFTimeInterval = 0.5
+    /// A strip layout put off while something moves (`layoutStripWhenIdle`) is tried again this often.
+    static let stripLayoutRetryInterval: TimeInterval = 0.05
+    private var stripLayoutRetry = false
+    /// The window whose close-up is under way (`closeUpAfterEnteredClose`), from the first report of its
+    /// close until the canvas is forward with the strip closed up.
+    private var closingUp: CGWindowID?
     /// The 1:1 camera a window was last entered at: where the screen is in the world, as the user last
     /// saw it at 1x. A window placed on the canvas while the canvas is up goes natively to its spot
     /// through this camera, so its real place agrees with its canvas place (outside the windows it was
@@ -511,7 +526,7 @@ final class CanvasController {
         // With a desk, it hands the window server's news to every display's canvas.
         if desk == nil {
             WindowServerEvents.onWindowCreated = { [weak self] id in self?.windowServerCreated(id) }
-            WindowServerEvents.onWindowRemoved = { [weak self] _ in self?.windowServerRemoved() }
+            WindowServerEvents.onWindowRemoved = { [weak self] id in self?.windowServerRemoved(id) }
         }
         WindowServerEvents.start()
 
@@ -1939,9 +1954,74 @@ final class CanvasController {
     /// isn't canvas material) the moment it's announced. The first listing that has it pops it in, and
     /// the add-on scales it in the same breath.
     /// A window closed, was minimized or hidden, or moved to another Space: the listing says which.
-    func windowServerRemoved() {
+    func windowServerRemoved(_ id: CGWindowID) {
+        if closeUpAfterEnteredClose(id) { return }
         guard isUp, activeProxy == nil, !asleep else { return }
         scheduleDiff()
+    }
+
+    /// Strip mode: the window in use closed (or the one just left for the window macOS focused after it).
+    /// Rather than staying in whatever macOS focused, with a gap in the strip until the canvas next lays
+    /// it out, the canvas comes forward, the closed window leaves it, the strip closes up, and the window
+    /// that took its place (`Strip.successor`) is entered, gliding into the place on the way. True when
+    /// the canvas takes it from here.
+    private func closeUpAfterEnteredClose(_ id: CGWindowID, until deadline: CFTimeInterval? = nil) -> Bool {
+        // Reported twice (Accessibility's destroyed notification, then the window server's removal): once.
+        if deadline == nil, closingUp == id { return true }
+        guard Settings.stripMode, renderer == .realWindows, id != 0, !NSApp.isActive, restoring == nil,
+              addingWidgets == nil, !handingOff, let closed = proxies[id], closed.kind == .window,
+              closed === activeProxy || (leftWindow?.id == id && CACurrentMediaTime() - (leftWindow?.at ?? 0) < 1)
+        else {
+            if closingUp == id { closingUp = nil }
+            return false
+        }
+        closingUp = id
+        // Gone for good, not minimized, hidden or moved to another Space (those keep their slot). The
+        // window server reports a window leaving the screen a moment before its app destroys it, so a
+        // window still there is looked at again every frame for a moment; one that stays is away.
+        if WindowList.exists(id) {
+            let deadline = deadline ?? CACurrentMediaTime() + CanvasController.closeConfirmWait
+            guard CACurrentMediaTime() < deadline else {
+                closingUp = nil
+                return false
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+                MainActor.assumeIsolated { _ = self?.closeUpAfterEnteredClose(id, until: deadline) }
+            }
+            return true
+        }
+        let windows = stripWindows
+        let columns = settleStripOrder(windows)
+        guard let i = windows.firstIndex(where: { $0 === closed }),
+              let n = Strip.successor(of: i, in: columns, away: windows.map { $0.away != nil }) else {
+            closingUp = nil
+            return false
+        }
+        let next = windows[n]
+        NSLog("Strip: \(closed.appName) — \(closed.title) closed in use; into \(next.appName) — \(next.title), which takes its place")
+        leftWindow = nil
+        closingUpUntil = Date().addingTimeInterval(CanvasController.closeQuiet)
+        holdKeys(for: next)
+        let from = next.worldRect.origin
+        let asked = CACurrentMediaTime()
+        pendingPlacement = { [weak self, weak next] in
+            guard let self else { return }
+            self.closingUp = nil
+            guard let next, self.proxies[next.windowID] === next, CACurrentMediaTime() - asked < CanvasController.keyHoldLimit else {
+                return self.dropHeldKeys()
+            }
+            self.runDiff()   // the closed window leaves the canvas: it's off the listing
+            self.layoutStrip(animated: false)
+            let gliding = next.worldRect.origin != from ? from : nil
+            if self.view.camera.toWorld(self.visibleTopLeft).contains(next.worldRect) {
+                let middle = self.view.camera.toScreen(CGPoint(x: next.worldRect.midX, y: next.worldRect.midY))
+                self.handoff(to: next, placement: .inPlace(around: middle), gliding: gliding)
+            } else {
+                self.handoff(to: next, placement: .centered, gliding: gliding)
+            }
+        }
+        show()
+        return true
     }
 
     func windowServerCreated(_ id: CGWindowID) {
@@ -3731,7 +3811,21 @@ final class CanvasController {
     /// The listing found the canvas changed (windows opened, closed, resized by their apps): the strip
     /// closes up or makes room, once nothing is moving.
     private func layoutStripWhenIdle() {
-        guard Settings.stripMode, NSApp.isActive, activeProxy == nil, !view.isBusy else { return }
+        guard Settings.stripMode, NSApp.isActive, activeProxy == nil else { return }
+        // A glide or camera move with nothing waiting on it is taken over (`CanvasView.glide`); anything
+        // else still moving (a handoff, a flight, a drag) is looked at again shortly rather than at the
+        // next listing, which left a closed window's gap open for up to `listingInterval`.
+        guard !view.isBusy || view.isGlidingFreely else {
+            guard !stripLayoutRetry else { return }
+            stripLayoutRetry = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + CanvasController.stripLayoutRetryInterval) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.stripLayoutRetry = false
+                    self?.layoutStripWhenIdle()
+                }
+            }
+            return
+        }
         layoutStrip(animated: true)
     }
 
@@ -4660,6 +4754,7 @@ final class CanvasController {
     /// canvas-initiated handoff (which activates the app) and takeover's absorb (the app is already active).
     private func enter(_ p: WindowProxy, realFrame: CGRect, activateApp: Bool) {
         clearLaunches()   // the user chose a window; a launch still in flight is then absorbed as before
+        if let old = activeProxy, old !== p { leftWindow = (old.windowID, CACurrentMediaTime()) }
         activeProxy = p
         lastActiveProxy = p
         handingOff = false
@@ -5178,13 +5273,15 @@ final class CanvasController {
     /// stay on top of the ones it covers (`NewWindowSpot.inFront`). The canvas comes forward with it at
     /// the free spot nearest `near` and enters it there: where it is on screen if the spot is on screen,
     /// otherwise going over to it. `real`: its frame on screen. True when the canvas takes it: the
-    /// caller then doesn't enter it.
+    /// caller then doesn't enter it. In strip mode the window takes its slot on the strip instead
+    /// (`placeOnStrip`).
     private func placeInFront(_ p: WindowProxy, real: CGRect, near: WindowProxy?) -> Bool {
+        if Settings.stripMode { return placeOnStrip(p, real: real) }
         // On its way there already (its app focusing it meanwhile): the canvas enters it.
         if heldKeys?.windowID == p.windowID { return true }
         // Not while the canvas presents the live windows: their native frames aren't where they're drawn.
         // The arrival is taken last: a placement put off for a moment (a handoff ending) is still to come.
-        guard Settings.magnetism, !Settings.stripMode, p.standsAlone, restoring == nil,
+        guard Settings.magnetism, p.standsAlone, restoring == nil,
               addingWidgets == nil, !handingOff, !(renderer == .realWindows && realWindowsPresented),
               abs(view.camera.zoom - 1) < 0.001, takeArrival(p) else { return false }
         let camera = view.camera
@@ -5211,6 +5308,41 @@ final class CanvasController {
         // from where it opened to the spot with the camera instead.
         p.place(at: spot.origin)
         p.layout(zoom: camera.zoom)
+        let native = takeNativelyToSpot(p, real: real, camera: camera)
+        slide(into: p, onScreen: onScreen, from: native.origin == real.origin ? opened.origin : nil)
+        return true
+    }
+
+    /// Strip mode's `placeInFront`: a window that just opened in front at 1:1 takes its slot on the strip
+    /// at once (`noteStripArrivals`: the bottom of its app's column or a new column after the one in use;
+    /// the front with Recent apps first), rather than staying over the window in use until the canvas
+    /// next lays the strip out. The canvas comes forward, lays the strip out around it, and enters it.
+    /// True when the canvas takes it: the caller then doesn't enter it.
+    private func placeOnStrip(_ p: WindowProxy, real: CGRect) -> Bool {
+        if heldKeys?.windowID == p.windowID { return true }
+        guard Settings.stripMode, p.standsAlone, p.kind == .window, restoring == nil, addingWidgets == nil, !handingOff,
+              !(renderer == .realWindows && realWindowsPresented), abs(view.camera.zoom - 1) < 0.001,
+              takeArrival(p) else { return false }
+        let camera = view.camera
+        let opened = CGRect(origin: camera.toWorld(toView(real).origin), size: real.size)
+        p.place(at: opened.origin)
+        noteStripArrivals([p], arriving: true)
+        let windows = stripWindows
+        let placed = Strip.layout(stripItems(windows), columns: settleStripOrder(windows), origin: stripOrigin, gap: stripGap)
+        guard let i = windows.firstIndex(where: { $0 === p }) else { return false }
+        let spot = placed.rects[i]
+        p.place(at: spot.origin)
+        p.layout(zoom: camera.zoom)
+        let native = takeNativelyToSpot(p, real: real, camera: camera)
+        // The rest of the strip makes room as the canvas comes forward (`slide`'s `arranging`): moved now,
+        // under the window in use, the windows of its app would be read back at their old native frames.
+        slide(into: p, onScreen: camera.toWorld(visibleTopLeft).contains(spot), arranging: true,
+              from: native.origin == real.origin ? opened.origin : nil)
+        return true
+    }
+
+    /// A new window's real counterpart to its canvas spot, seen through `camera`; returns where it is now.
+    private func takeNativelyToSpot(_ p: WindowProxy, real: CGRect, camera: Camera) -> CGRect {
         var native = real
         if renderer == .realWindows {
             let origin = nativeOrigin(of: p, at: camera)
@@ -5231,8 +5363,7 @@ final class CanvasController {
             }
         }
         p.placedNatively(at: native)
-        slide(into: p, onScreen: onScreen, from: native.origin == real.origin ? opened.origin : nil)
-        return true
+        return native
     }
 
     /// A window placed on the live canvas while the canvas is up goes natively to its spot through the
@@ -5267,7 +5398,9 @@ final class CanvasController {
     /// `from`: where the window is drawn now, in the world (where it opened), so that on the live canvas
     /// it glides from there to its spot with the camera's flight rather than jumping to the spot (off the
     /// screen, for one over to it) the moment the canvas comes forward, and sliding in from there.
-    private func slide(into p: WindowProxy, onScreen: Bool, from: CGPoint? = nil) {
+    /// `arranging`: strip mode — the strip is laid out around the new window first, the moment the canvas is
+    /// forward and its windows have been read back.
+    private func slide(into p: WindowProxy, onScreen: Bool, arranging: Bool = false, from: CGPoint? = nil) {
         NSLog("New window: \(p.appName) — \(p.title) opened over others — to \(p.worldRect.origin)\(onScreen ? ", on screen" : ", over to it")")
         holdKeys(for: p)
         // One sliding in at a time: one before it whose placement this replaces shows where it is.
@@ -5293,6 +5426,7 @@ final class CanvasController {
                 return self.dropHeldKeys()
             }
             let gliding = self.renderer == .realWindows ? from : nil
+            if arranging { self.layoutStrip(animated: false) }
             if onScreen {
                 self.handoff(to: p, placement: .inPlace(around: self.view.camera.toScreen(CGPoint(x: p.worldRect.midX, y: p.worldRect.midY))), gliding: gliding)
             } else {
@@ -5303,7 +5437,7 @@ final class CanvasController {
     }
 
     /// Whether a window announced with another app in front is the canvas's to take in (`takeInFront`).
-    private var takesInFront: Bool { Settings.magnetism && !Settings.stripMode && renderer == .realWindows }
+    private var takesInFront: Bool { (Settings.magnetism || Settings.stripMode) && renderer == .realWindows }
 
     /// The window server announced a window while one is entered (or while an app opened from inside one
     /// shows its first): a new window of the app in front is taken in at once, not when Accessibility
@@ -5689,6 +5823,13 @@ final class CanvasController {
             show()
             return
         }
+        // Likewise the window in use closing in strip mode: the canvas is on its way to the window that
+        // took its place (`closeUpAfterEnteredClose`), whatever macOS focused after the close.
+        if pendingPlacement != nil, Date() < closingUpUntil {
+            NSLog("Strip: \(app.localizedName ?? "pid \(pid)") came forward after the close — on to the next window")
+            show()
+            return
+        }
         // An app a layout restore opened, activating itself as it launches: its windows belong behind the
         // canvas, and the restore brings the canvas back in front.
         if let restoring, let id = app.bundleIdentifier, restoring.apps.contains(id) { return }
@@ -5989,7 +6130,10 @@ final class CanvasController {
 
     /// The entered window closed. Apps usually focus a sibling first (handled above); if nothing is
     /// focused after a beat, the canvas comes back.
+    /// In strip mode the window that takes its place is entered at once instead (`closeUpAfterEnteredClose`),
+    /// whatever the app focuses.
     func enteredWindowDestroyed(pid: pid_t) {
+        if let p = activeProxy, p.pid == pid, closeUpAfterEnteredClose(p.windowID) { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self, self.activeProxy?.pid == pid, !NSApp.isActive else { return }
             if AXWindow.focusedWindow(pid: pid) == nil {

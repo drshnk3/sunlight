@@ -958,10 +958,33 @@ final class CanvasView: NSView {
 
     /// Eases windows to new places on the canvas, the camera staying where it is. No completion: one
     /// would be reported as a cancelled handoff if something interrupted the glide.
+    ///
+    /// A glide or camera move already under way with nothing waiting on its end (no handoff) is taken
+    /// over from where everything is now: the windows it was moving that these don't name go on to where
+    /// they were going, and the camera with them. Interrupted instead, its windows jumped to their ends
+    /// first; waited for, a closed window's gap stayed open until it was over (strip mode).
     func glide(_ moves: [(proxy: WindowProxy, to: CGPoint)], duration: CFTimeInterval = CanvasView.snapDuration) {
-        let moves = moves.filter { $0.proxy.worldRect.origin != $0.to }
+        var moves = moves.filter { $0.proxy.worldRect.origin != $0.to }
+        if let running = animation, running.completion == nil {
+            // Already on their way there: the glide goes on as it is, its easing not started over.
+            let heading = Dictionary(running.moves.map { (ObjectIdentifier($0.proxy), $0.to) }, uniquingKeysWith: { a, _ in a })
+            guard moves.contains(where: { heading[ObjectIdentifier($0.proxy)] != $0.to }) else { return }
+            let named = Set(moves.map { ObjectIdentifier($0.proxy) })
+            moves += running.moves
+                .filter { m in !named.contains(ObjectIdentifier(m.proxy)) && proxies.contains { $0 === m.proxy } && m.proxy.worldRect.origin != m.to }
+                .map { ($0.proxy, $0.to) }
+            animation = nil   // not `interruptMotion`: that puts its windows at their ends first
+            guard !moves.isEmpty || !camera.isClose(to: running.to) else { return }
+            animateCamera(to: running.to, duration: duration, moving: moves)
+            return
+        }
         guard !moves.isEmpty else { return }
         animateCamera(to: camera, duration: duration, moving: moves)
+    }
+
+    /// Only a glide or camera move with nothing waiting on its end is under way: `glide` takes it over.
+    var isGlidingFreely: Bool {
+        animation != nil && animation?.completion == nil && flight == nil && dragging == nil && resizing == nil && magnet == nil
     }
 
     var isFlying: Bool { flight != nil }

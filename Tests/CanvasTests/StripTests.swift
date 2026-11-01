@@ -177,4 +177,27 @@ final class StripTests: XCTestCase {
         XCTAssertEqual(Strip.neighbour(of: 0, in: columns, away: away, direction: .right), 3)
         XCTAssertNil(Strip.neighbour(of: 3, in: columns, away: away, direction: .up))
     }
+
+    // MARK: Closing the window in use
+
+    func testTheWindowBelowTakesOverInItsColumn() {
+        let columns = [[0, 1, 2], [3]]
+        let away = [false, false, false, false]
+        XCTAssertEqual(Strip.successor(of: 1, in: columns, away: away), 2)
+        XCTAssertEqual(Strip.successor(of: 2, in: columns, away: away), 1, "the bottom one: the one above")
+    }
+
+    func testAloneInItsColumnTheNextColumnTakesOver() {
+        let columns = [[0], [1, 2], [3]]
+        let away = [false, false, false, false]
+        XCTAssertEqual(Strip.successor(of: 0, in: columns, away: away), 1)
+        XCTAssertEqual(Strip.successor(of: 3, in: columns, away: away), 1, "the last column: the previous one's top")
+    }
+
+    func testAwayWindowsNeverTakeOver() {
+        let columns = [[0, 1], [2]]
+        XCTAssertEqual(Strip.successor(of: 0, in: columns, away: [false, true, false]), 2)
+        XCTAssertNil(Strip.successor(of: 0, in: columns, away: [false, true, true]))
+        XCTAssertNil(Strip.successor(of: 0, in: [[0]], away: [false]))
+    }
 }

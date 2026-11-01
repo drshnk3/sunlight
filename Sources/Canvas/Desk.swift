@@ -42,7 +42,7 @@ final class Desk {
         NSLog("Displays: \(displays.map { "\($0.name) \(Int($0.frame.width))×\(Int($0.frame.height)) at \(Int($0.frame.minX)),\(Int($0.frame.minY))" }.joined(separator: "; "))")
 
         WindowServerEvents.onWindowCreated = { [weak self] id in self?.canvases.forEach { $0.windowServerCreated(id) } }
-        WindowServerEvents.onWindowRemoved = { [weak self] _ in self?.canvases.forEach { $0.windowServerRemoved() } }
+        WindowServerEvents.onWindowRemoved = { [weak self] id in self?.canvases.forEach { $0.windowServerRemoved(id) } }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.displaysChanged() }

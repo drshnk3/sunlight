@@ -151,6 +151,17 @@ enum Strip {
         return [column] + columns.filter { !$0.isEmpty }
     }
 
+    /// The window that takes over once `item` closes, as the strip closes up around the gap: the one below
+    /// it in its column (which moves up into its place), else the one above, else the top of the next
+    /// column (which moves left into its place), else of the previous one. Hidden and minimized windows
+    /// are skipped. nil when nothing else is on the canvas.
+    static func successor(of item: Int, in columns: [[Int]], away: [Bool]) -> Int? {
+        neighbour(of: item, in: columns, away: away, direction: .down)
+            ?? neighbour(of: item, in: columns, away: away, direction: .up)
+            ?? neighbour(of: item, in: columns, away: away, direction: .right)
+            ?? neighbour(of: item, in: columns, away: away, direction: .left)
+    }
+
     /// The window the arrow keys go to from `item`: ← → the top window of the next column on that side
     /// that has one on the canvas, ↑ ↓ the next window up or down its own column. Hidden and minimized
     /// windows are skipped. nil at either end.
