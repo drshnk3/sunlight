@@ -1887,10 +1887,6 @@ final class CanvasController {
     /// Without live capture, when a widget's still was last renewed in live mode, and whose turn is next.
     private var widgetStillAt: CFTimeInterval = -.infinity
     private var widgetStillCursor = 0
-    private var listing = false
-    /// Counts listings, so one still in flight when a newer one has landed (`listNow`) is dropped: an
-    /// older list lacks the window just found, and reconciling to it would hand that window back.
-    private var listingGeneration = 0
     /// While a new window is expected (`windowServerCreated`): a listing every frame until then.
     private var arrivalWatchUntil: CFTimeInterval = 0
     private var arrivalTimer: Timer?
@@ -1932,30 +1928,10 @@ final class CanvasController {
     /// the stale frame would yank the proxy away from the real window at the seam. Nor while adding
     /// widgets: edit mode takes every window off the screen, and a listing would drop all their proxies.
     /// Nor with a window entered: the real desktop is the truth for that one, and the canvas isn't up.
+    /// On the main thread, about a millisecond (see `WindowList.onScreen` for why never off it).
     private func runDiff() {
-        guard !configuringRenderer, !listing, !asleep, isUp, activeProxy == nil, !handingOff, addingWidgets == nil, !deskEditing else { return }
-        listing = true
-        listingGeneration += 1
-        let generation = listingGeneration
-        WindowList.queue.async { [weak self] in
-            let list = WindowList.onScreen()
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.listing = false
-                    guard generation == self.listingGeneration else { return }
-                    self.reconcile(with: list)
-                }
-            }
-        }
-    }
-
-    /// A listing now, waited for on the main thread (about a millisecond): for a window that just
-    /// appeared, which shows at full size until its first frame scales it.
-    private func listNow() {
         guard !configuringRenderer, !asleep, isUp, activeProxy == nil, !handingOff, addingWidgets == nil, !deskEditing else { return }
-        listingGeneration += 1
-        reconcile(with: WindowList.queue.sync { WindowList.onScreen() })
+        reconcile(with: WindowList.onScreen())
     }
 
     /// The window server says a window appeared. On the live canvas it is listed at once, and then every frame
@@ -1985,7 +1961,7 @@ final class CanvasController {
         // window of the app in front shows at once, lifted above the canvas where the app put it.
         if id != 0, !NSApp.isActive, renderer == .realWindows, additionNumber >= 27 { liftIfFront(id) }
         guard renderer == .realWindows, isUp, activeProxy == nil, !asleep else { return }
-        listNow()
+        runDiff()
         arrivalWatchUntil = CACurrentMediaTime() + CanvasController.arrivalWatch
         if id != 0 { arrivalsExpected.insert(id) } else { arrivalsUnknown = true }
         guard arrivalTimer == nil else { return }
@@ -2018,7 +1994,7 @@ final class CanvasController {
         arrivalsExpected = arrivalsExpected.filter { proxies[$0] == nil }
         if arrivalsExpected.isEmpty, !arrivalsUnknown { return }
         guard arrivalsUnknown || arrivalsExpected.contains(where: { WindowList.onScreen($0) != nil }) else { return }
-        listNow()
+        runDiff()
     }
 
     /// How long after the window server announces a window the canvas keeps looking for it every frame.
@@ -2208,10 +2184,7 @@ final class CanvasController {
     /// canvas current before going on (a layout restore).
     func syncNow() async {
         guard NSApp.isActive, activeProxy == nil, !handingOff, addingWidgets == nil else { return }
-        let list = await withCheckedContinuation { (c: CheckedContinuation<[WindowInfo], Never>) in
-            WindowList.queue.async { c.resume(returning: WindowList.onScreen()) }
-        }
-        reconcile(with: list)
+        reconcile(with: WindowList.onScreen())
         if !fullSyncRequested.isEmpty || syncing { await syncShareableContent() }
     }
 
@@ -4263,7 +4236,7 @@ final class CanvasController {
         // listing may not have landed, and none lands during a handoff: the live windows were never
         // presented, so the flight played with nothing on screen following it and the window jumped
         // into place at the seam. One now, before the handoff starts, so the flight carries them.
-        if renderer == .realWindows, !realWindowListReady { listNow() }
+        if renderer == .realWindows, !realWindowListReady { runDiff() }
         handingOff = true
         endShowDesktop(flyBack: false)
         handoffTarget = p   // before the camera moves: the pass must not restart its stream mid-flight
@@ -4618,7 +4591,7 @@ final class CanvasController {
     /// readings disagree by a fraction, and no frame is read against a camera other than the one it
     /// belongs with (`FrameSnapshot`). About a millisecond, on the main thread.
     private func snapshot(at camera: Camera? = nil) -> FrameSnapshot {
-        FrameSnapshot(list: WindowList.queue.sync { WindowList.onScreen() }, camera: global(camera ?? view.camera))
+        FrameSnapshot(list: WindowList.onScreen(), camera: global(camera ?? view.camera))
     }
 
     /// Where a window sits natively when the canvas is at `camera`, in global points: its canvas place

@@ -17,10 +17,15 @@ struct WindowInfo: Sendable {
 /// desktop's worth of windows, against the tens of milliseconds and the daemon round trip of
 /// `SCShareableContent`. It's what keeps the canvas in agreement with the desktop from second to
 /// second; ScreenCaptureKit is asked only when a new window needs a stream.
+///
+/// Call the listings on the main thread. `CGWindowListCopyWindowInfo` takes SkyLight's connection lock
+/// and then waits for this process's last Core Animation transaction to reach the window server; off
+/// the main thread, that can catch the main thread committing a frame, which needs the same lock. Each
+/// then waits on the other until SkyLight gives up after half a second (sampled 2026-11-01: the canvas
+/// froze for 500 ms as a pan from a window brought it back, the listing `returnedToCanvas` asks for
+/// landing on the camera's first frame). On the main thread, no commit can be under way.
 enum WindowList {
-    static let queue = DispatchQueue(label: "canvas.windowlist", qos: .userInitiated)
-
-    /// Every window on screen, front to back, on the current Space. Call it on `queue`.
+    /// Every window on screen, front to back, on the current Space.
     nonisolated static func onScreen() -> [WindowInfo] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return []
