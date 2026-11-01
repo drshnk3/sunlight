@@ -1963,8 +1963,9 @@ final class CanvasController {
     /// Strip mode: the window in use closed (or the one just left for the window macOS focused after it).
     /// Rather than staying in whatever macOS focused, with a gap in the strip until the canvas next lays
     /// it out, the canvas comes forward, the closed window leaves it, the strip closes up, and the window
-    /// that took its place (`Strip.successor`) is entered, gliding into the place on the way. True when
-    /// the canvas takes it from here.
+    /// that took its place (`Strip.successor`) is entered, gliding into the place on the way; with none
+    /// (the last window on the strip), the canvas just comes back without it. True when the canvas takes
+    /// it from here.
     private func closeUpAfterEnteredClose(_ id: CGWindowID, until deadline: CFTimeInterval? = nil) -> Bool {
         // Reported twice (Accessibility's destroyed notification, then the window server's removal): once.
         if deadline == nil, closingUp == id { return true }
@@ -1992,15 +1993,27 @@ final class CanvasController {
         }
         let windows = stripWindows
         let columns = settleStripOrder(windows)
-        guard let i = windows.firstIndex(where: { $0 === closed }),
-              let n = Strip.successor(of: i, in: columns, away: windows.map { $0.away != nil }) else {
+        guard let i = windows.firstIndex(where: { $0 === closed }) else {
             closingUp = nil
             return false
         }
-        let next = windows[n]
-        NSLog("Strip: \(closed.appName) — \(closed.title) closed in use; into \(next.appName) — \(next.title), which takes its place")
         leftWindow = nil
         closingUpUntil = Date().addingTimeInterval(CanvasController.closeQuiet)
+        guard let n = Strip.successor(of: i, in: columns, away: windows.map { $0.away != nil }) else {
+            // The last window on the strip (or the last not hidden or minimized): nothing takes its place,
+            // so the canvas comes back, without it, rather than leaving the user in whatever macOS focused.
+            NSLog("Strip: \(closed.appName) — \(closed.title) closed in use, the last on the strip — back to the canvas")
+            pendingPlacement = { [weak self] in
+                guard let self else { return }
+                self.closingUp = nil
+                self.runDiff()   // the closed window leaves the canvas: it's off the listing
+                self.layoutStrip(animated: true)
+            }
+            show()
+            return true
+        }
+        let next = windows[n]
+        NSLog("Strip: \(closed.appName) — \(closed.title) closed in use; into \(next.appName) — \(next.title), which takes its place")
         holdKeys(for: next)
         let from = next.worldRect.origin
         let asked = CACurrentMediaTime()
@@ -5313,17 +5326,19 @@ final class CanvasController {
         return true
     }
 
-    /// Strip mode's `placeInFront`: a window that just opened in front at 1:1 takes its slot on the strip
-    /// at once (`noteStripArrivals`: the bottom of its app's column or a new column after the one in use;
-    /// the front with Recent apps first), rather than staying over the window in use until the canvas
-    /// next lays the strip out. The canvas comes forward, lays the strip out around it, and enters it.
-    /// True when the canvas takes it: the caller then doesn't enter it.
+    /// Strip mode's `placeInFront`: a window that just opened in front takes its slot on the strip at once
+    /// (`noteStripArrivals`: the bottom of its app's column or a new column after the one in use; the
+    /// front with Recent apps first), rather than staying over the window in use until the canvas next
+    /// lays the strip out. The canvas comes forward, lays the strip out around it, and enters it. Its slot
+    /// comes from the strip's order, not from where it opened, so the canvas needn't be at 1:1: zoomed out
+    /// (an app launched from the canvas), the canvas goes over to it at 1:1. True when the canvas takes
+    /// it: the caller then doesn't enter it.
     private func placeOnStrip(_ p: WindowProxy, real: CGRect) -> Bool {
         if heldKeys?.windowID == p.windowID { return true }
         guard Settings.stripMode, p.standsAlone, p.kind == .window, restoring == nil, addingWidgets == nil, !handingOff,
-              !(renderer == .realWindows && realWindowsPresented), abs(view.camera.zoom - 1) < 0.001,
-              takeArrival(p) else { return false }
+              !(renderer == .realWindows && realWindowsPresented), takeArrival(p) else { return false }
         let camera = view.camera
+        let oneToOne = abs(camera.zoom - 1) < 0.001
         let opened = CGRect(origin: camera.toWorld(toView(real).origin), size: real.size)
         p.place(at: opened.origin)
         noteStripArrivals([p], arriving: true)
@@ -5333,20 +5348,26 @@ final class CanvasController {
         let spot = placed.rects[i]
         p.place(at: spot.origin)
         p.layout(zoom: camera.zoom)
-        let native = takeNativelyToSpot(p, real: real, camera: camera)
+        // Zoomed out, no native spot is where the canvas draws it: parked until the seam, which takes it
+        // to where the handoff's 1:1 camera has it (the place the last 1:1 camera gives it, should the
+        // canvas not get there).
+        let native = oneToOne ? takeNativelyToSpot(p, real: real, camera: camera)
+            : takeNativelyToSpot(p, real: real, camera: lastOneToOne ?? homeCamera, parking: true)
         // The rest of the strip makes room as the canvas comes forward (`slide`'s `arranging`): moved now,
         // under the window in use, the windows of its app would be read back at their old native frames.
-        slide(into: p, onScreen: camera.toWorld(visibleTopLeft).contains(spot), arranging: true,
+        slide(into: p, onScreen: oneToOne && camera.toWorld(visibleTopLeft).contains(spot), arranging: true,
               from: native.origin == real.origin ? opened.origin : nil)
         return true
     }
 
     /// A new window's real counterpart to its canvas spot, seen through `camera`; returns where it is now.
-    private func takeNativelyToSpot(_ p: WindowProxy, real: CGRect, camera: Camera) -> CGRect {
+    /// `parking`: off the screen until the seam even with the canvas in front (zoomed out, the spot isn't
+    /// anywhere on the screen).
+    private func takeNativelyToSpot(_ p: WindowProxy, real: CGRect, camera: Camera, parking: Bool = false) -> CGRect {
         var native = real
         if renderer == .realWindows {
             let origin = nativeOrigin(of: p, at: camera)
-            if !NSApp.isActive, additionNumber >= 15 {
+            if parking || !NSApp.isActive, additionNumber >= 15 {
                 // The canvas is away (a window is in use), so the spot is on the screen at 1x: parked off
                 // the screen until the seam, whose transaction moves it to the spot as it lifts it. Moved
                 // to the spot now it showed there, full-size beside the window in use, for the 80 ms
