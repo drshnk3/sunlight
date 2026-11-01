@@ -4559,9 +4559,23 @@ final class CanvasController {
 
     /// At 1:1 the window on the canvas is the real one, so a press on it is the window's own: it's entered
     /// where it is (nothing moves) and the press goes on to it, as a click on an inactive window does on
-    /// the desktop.
+    /// the desktop. Unless the window is partly off the screen (a pan left it over the edge): then it's
+    /// entered as a click from zoomed out enters one, slid only as far as it takes to be wholly on screen
+    /// (or into the middle, by Settings › Canvas), and the press isn't passed on, the window having moved
+    /// out from under it. Entered where it was, only the part on screen showed.
     private func use(_ p: WindowProxy, around point: CGPoint, press: NSEvent) {
         passedPress = nil
+        // Past the screen's own edges, not the visible area's: a window reaching under the Dock or the
+        // menu bar is on screen as the desktop has it, and is used where it is.
+        let drawn = CGRect(origin: view.camera.toScreen(p.worldRect.origin), size: p.worldRect.size)
+        let screen = CGRect(origin: .zero, size: view.bounds.size)
+        let fitted = Handoff.fittedOrigin(drawn.origin, size: drawn.size, in: screen)
+        if abs(fitted.x - drawn.minX) > 1 || abs(fitted.y - drawn.minY) > 1 {
+            let grab = view.camera.toWorld(point)
+            let offset = CGPoint(x: grab.x - p.worldRect.minX, y: grab.y - p.worldRect.minY)
+            NSLog("Use: \(p.appName) — \(p.title) is partly off the screen; entered as a click, slid onto it")
+            return handoff(to: p, placement: Settings.clickCentres ? .clickedCentred : .clicked(at: point, offset: offset))
+        }
         guard let cg = press.cgEvent else { return handoff(to: p, placement: .inPlace(around: point)) }
         passedPress = PassedPress(windowID: p.windowID, location: cg.location,
                                   clickState: cg.getIntegerValueField(.mouseEventClickState))
