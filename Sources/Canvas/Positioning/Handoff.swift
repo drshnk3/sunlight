@@ -20,7 +20,8 @@ enum Handoff {
         /// 1:1 down from its top edge, the point's x staying under the pointer.
         case inPlace(around: CGPoint)
         /// A click on the proxy at `offset` inside it (world units, which are the real window's points):
-        /// it grows to 1:1 around the clicked spot, which stays under the pointer as far as the screen allows.
+        /// it grows to 1:1 around the clicked spot, then slides only as far as it takes to be wholly on
+        /// screen (`fittedOrigin`), so the clicked spot stays under the pointer as far as the screen allows.
         case clicked(at: CGPoint, offset: CGPoint)
         /// A click, with Settings › Canvas › "Click centres the window": in the middle, as `centered`,
         /// but flown as long as a click's way in, so a double-click's second click still lands on the canvas.
@@ -64,7 +65,11 @@ enum Handoff {
             origin = CGPoint(x: rect.minX - camera.toWorld(point).x + point.x, y: camera.toScreen(rect.origin).y)
             keepsPlace = true
         case .clicked(let point, let offset):
-            origin = CGPoint(x: point.x - offset.x, y: point.y - offset.y)
+            // Grown around the clicked spot, then slid only as far as it takes to be wholly on screen:
+            // clicked near its far side from zoomed out, the window used to land mostly off the screen.
+            // Slid before the in-place camera is worked out, so the camera goes over to it and the
+            // window keeps its place on the canvas.
+            origin = fittedOrigin(CGPoint(x: point.x - offset.x, y: point.y - offset.y), size: rect.size, in: visible)
             keepsPlace = true
             clicked = true
         }
@@ -87,6 +92,17 @@ enum Handoff {
         if rect.width > visible.width { origin.x = visible.minX }
         if rect.height > visible.height { origin.y = visible.minY }
         return origin
+    }
+
+    /// `origin` moved the least it takes for a window of `size` to be wholly in `visible`: its left edge
+    /// no further left than the screen's, its right edge no further right, and likewise top and bottom.
+    /// Wider (or taller) than the visible area, it starts at the left (top), as a centred one does.
+    static func fittedOrigin(_ origin: CGPoint, size: CGSize, in visible: CGRect) -> CGPoint {
+        func fit(_ v: CGFloat, length: CGFloat, from lo: CGFloat, to hi: CGFloat) -> CGFloat {
+            length >= hi - lo ? lo : min(max(v, lo), hi - length)
+        }
+        return CGPoint(x: fit(origin.x, length: size.width, from: visible.minX, to: visible.maxX),
+                       y: fit(origin.y, length: size.height, from: visible.minY, to: visible.maxY))
     }
 
     /// Where a window sits natively when the canvas is at `camera`: its canvas place through the

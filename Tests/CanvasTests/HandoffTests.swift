@@ -50,10 +50,50 @@ final class HandoffTests: XCTestCase {
     }
 
     func testAClickKeepsTheClickedSpotUnderThePointer() {
-        let p = plan(.clicked(at: CGPoint(x: 1000, y: 700), offset: CGPoint(x: 100, y: 50)))
-        XCTAssertEqual(p.origin, CGPoint(x: 900, y: 650))
+        let p = plan(.clicked(at: CGPoint(x: 1000, y: 400), offset: CGPoint(x: 100, y: 50)))
+        XCTAssertEqual(p.origin, CGPoint(x: 900, y: 350))
         XCTAssertTrue(p.clicked)
         XCTAssertNotNil(p.inPlace)
+    }
+
+    // MARK: A click lands wholly on screen
+
+    /// Clicked near its right side, its picture on the left of the screen: grown around the spot, the
+    /// window would start 400 points off the left edge. It slides right to the edge, and the camera goes
+    /// over to it, so the window keeps its place on the canvas.
+    func testAClickNearTheFarSideKeepsTheLeftEdgeOnScreen() {
+        let p = plan(.clicked(at: CGPoint(x: 300, y: 400), offset: CGPoint(x: 700, y: 50)))
+        XCTAssertEqual(p.origin, CGPoint(x: 0, y: 350))
+        XCTAssertEqual(p.inPlace, p.camera, "the camera moves, not the window")
+        XCTAssertEqual(p.camera.toScreen(window.origin), p.origin)
+    }
+
+    func testAClickNearTheNearSideKeepsTheRightEdgeOnScreen() {
+        let p = plan(.clicked(at: CGPoint(x: 1900, y: 400), offset: CGPoint(x: 100, y: 50)))
+        XCTAssertEqual(p.origin.x + window.width, visible.maxX)
+        XCTAssertEqual(p.origin, CGPoint(x: 1200, y: 350))
+    }
+
+    func testAClickLowDownKeepsTheBottomOnScreen() {
+        let p = plan(.clicked(at: CGPoint(x: 1000, y: 1150), offset: CGPoint(x: 100, y: 50)))
+        XCTAssertEqual(p.origin, CGPoint(x: 900, y: visible.maxY - window.height))
+    }
+
+    func testAClickedWindowWiderThanTheScreenStartsAtItsLeft() {
+        let wide = CGRect(x: 3000, y: 2000, width: 2400, height: 600)
+        let p = plan(.clicked(at: CGPoint(x: 1500, y: 400), offset: CGPoint(x: 2000, y: 50)), rect: wide)
+        XCTAssertEqual(p.origin.x, visible.minX)
+    }
+
+    func testAClickedWindowTallerThanTheScreenStartsUnderTheMenuBar() {
+        let tall = CGRect(x: 3000, y: 2000, width: 800, height: 1400)
+        let p = plan(.clicked(at: CGPoint(x: 1000, y: 600), offset: CGPoint(x: 100, y: 900)), rect: tall)
+        XCTAssertEqual(p.origin.y, visible.minY)
+    }
+
+    func testFittingMovesNothingAlreadyOnScreen() {
+        let o = CGPoint(x: 100, y: 200)
+        XCTAssertEqual(Handoff.fittedOrigin(o, size: CGSize(width: 800, height: 600), in: visible), o)
     }
 
     func testATiledWindowLinesUpWithItsArea() {
@@ -82,12 +122,20 @@ final class HandoffTests: XCTestCase {
     }
 
     func testNoWindowGoesAboveTheMenuBar() {
-        // Clicked near the top: the window's top would be above the menu bar.
-        let p = plan(.clicked(at: CGPoint(x: 1000, y: 10), offset: CGPoint(x: 100, y: 50)))
+        // Pinched in with its top on screen 40 points above the screen's top: above the menu bar.
+        let p = plan(.inPlace(around: CGPoint(x: 300, y: 10)), camera: Camera(origin: CGPoint(x: 2500, y: 2080), zoom: 0.5))
         XCTAssertEqual(p.origin.y, 38)
         // In place, the camera it would have ended at, before the menu bar had its say.
         XCTAssertEqual(p.inPlace?.toScreen(window.origin).y, -40)
         XCTAssertEqual(p.camera.toScreen(window.origin).y, 38)
+    }
+
+    /// Clicked near the top, the window is fitted under the menu bar before the in-place camera is worked
+    /// out: the camera goes down to it, and the window keeps its place on the canvas.
+    func testAClickNearTheTopLandsUnderTheMenuBarWithoutMovingTheWindow() {
+        let p = plan(.clicked(at: CGPoint(x: 1000, y: 10), offset: CGPoint(x: 100, y: 50)))
+        XCTAssertEqual(p.origin.y, 38)
+        XCTAssertEqual(p.inPlace, p.camera)
     }
 
     // MARK: A window's native place
