@@ -204,6 +204,24 @@ final class BackgroundRenderer {
     /// The camera moved: the blur level, the dim and the drift follow, with no animation.
     func cameraChanged(_ camera: Camera) {
         self.camera = camera
+        reapplyLook()
+    }
+
+    /// Another app is in front, the canvas behind it: the background looks as it does at 1:1 (sharp,
+    /// undimmed, no drift) whatever the camera is doing, as a desktop picture would. The canvas shows
+    /// around the app's windows and through the see-through menu bar; left zoomed out (an app that came
+    /// forward from See All), it was blurred and dimmed there, and the menu bar went from the wallpaper
+    /// to a flat grey from one visit to the next.
+    var appInFront = false {
+        didSet { if appInFront != oldValue { reapplyLook() } }
+    }
+
+    /// The zoom the look follows: 1 while an app is in front (`appInFront`).
+    private var lookZoom: CGFloat { BackgroundRenderer.lookZoom(camera: camera.zoom, appInFront: appInFront) }
+
+    static func lookZoom(camera zoom: CGFloat, appInFront: Bool) -> CGFloat { appInFront ? 1 : zoom }
+
+    private func reapplyLook() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         applyFocus()
@@ -497,7 +515,7 @@ final class BackgroundRenderer {
             dimLayer.isHidden = true
             return
         }
-        let position = spec.source.isPicture ? spec.blurPosition(forZoom: camera.zoom) : 0
+        let position = spec.source.isPicture ? spec.blurPosition(forZoom: lookZoom) : 0
         ensureLevels(around: position)
         // A clear level is hidden too: Core Animation then leaves it out of the frame for certain.
         for (i, l) in levelLayers.enumerated() where i >= 1 {
@@ -506,14 +524,14 @@ final class BackgroundRenderer {
             if l.opacity != opacity { l.opacity = opacity }
             if l.isHidden != (opacity == 0) { l.isHidden = opacity == 0 }
         }
-        let dim = Float(spec.dimAmount(forZoom: camera.zoom))
+        let dim = Float(spec.dimAmount(forZoom: lookZoom))
         if dimLayer.opacity != dim { dimLayer.opacity = dim }
         if dimLayer.isHidden != (dim == 0) { dimLayer.isHidden = dim == 0 }
     }
 
     /// With depth on, the picture follows a fraction of the camera's motion, held within its overscan.
     private func applyDepth() {
-        guard spec.depth, !spec.isPlainColor, !BackgroundSources.reduceMotion else {
+        guard spec.depth, !spec.isPlainColor, !BackgroundSources.reduceMotion, !appInFront else {
             if !CATransform3DIsIdentity(pictureLayer.transform) { pictureLayer.transform = CATransform3DIdentity }
             return
         }

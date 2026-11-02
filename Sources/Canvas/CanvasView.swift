@@ -455,6 +455,14 @@ final class CanvasView: NSView {
         layer?.addSublayer(frontFloorLayer)
         if let own = layer { backgroundRenderer.mount(in: own, bounds: bounds, scale: 2, occlusionSafe: true) }
         backgroundRenderer.onLookChanged = { [weak self] in self?.applyInk() }
+        // With another app in front, the background is the desktop under its windows and the menu bar:
+        // the same every time, not however zoomed out the canvas was left (`BackgroundRenderer.appInFront`).
+        backgroundRenderer.appInFront = !NSApp.isActive
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.backgroundRenderer.appInFront = !NSApp.isActive }
+            }
+        }
 
         dropGlow.fillColor = nil
         dropGlow.strokeColor = NSColor(red: 0.95, green: 0.75, blue: 0.2, alpha: 1).cgColor
