@@ -4,7 +4,7 @@ import Foundation
 /// Strip mode (Window › Strip Mode, ⌃⌥S): every window on one endless horizontal strip, one column per
 /// app, the app's windows stacked top to bottom inside it. The order is fixed: using a window never
 /// moves it. It changes when the user drags a window to a new place, and when a window opens (`adding`).
-/// With Settings › Canvas › Recent apps first, a window used or opened takes the front (`toFront`).
+/// With Settings › Experimental › Strip mode › Recent apps first, a window used or opened takes the front (`toFront`).
 /// World coordinates throughout (top-left origin, points). Pure: items in, columns and rects out; the
 /// controller gathers the windows, keeps the strip's order and animates.
 enum Strip {

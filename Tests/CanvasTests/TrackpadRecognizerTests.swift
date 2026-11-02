@@ -87,7 +87,7 @@ final class TrackpadRecognizerTests: XCTestCase {
         XCTAssertEqual(phases, [])
     }
 
-    // MARK: Swipe up (Settings › Trackpad)
+    // MARK: Swipe up (Settings › How to use)
 
     func testWithSwipeUpChosenAQuickStrokeUpIsSeeAllAndEndsThePan() {
         let phases = touch(line(from: CGPoint(x: 0.5, y: 0.2), to: CGPoint(x: 0.51, y: 0.5)), swipeUp: true)
@@ -190,7 +190,7 @@ final class TrackpadRecognizerTests: XCTestCase {
         XCTAssertEqual(phases, [.spread])
     }
 
-    // MARK: Three fingers (Settings › Trackpad)
+    // MARK: Three fingers (Settings › How to use)
 
     private let three: Set<Int32> = [1, 2, 3]
 
@@ -293,5 +293,18 @@ final class TrackpadRecognizerTests: XCTestCase {
         }
         XCTAssertEqual(phases.first, .began)
         XCTAssertFalse(phases.contains(.spread))
+    }
+}
+
+extension TrackpadRecognizerTests {
+    /// Sunlight off: the Mac's own four-finger swipes go through, so the Dock-control events aren't dropped.
+    func testDockControlIsLeftAloneWhileInactive() {
+        var r = TrackpadRecognizer()
+        r.active = false
+        _ = r.update(device: 1, fingers: [1, 2, 3, 4], centroid: CGPoint(x: 0.5, y: 0.5), now: 10)
+        XCTAssertEqual(r.dropDockControlUntil, 0)
+        var on = TrackpadRecognizer()
+        _ = on.update(device: 1, fingers: [1, 2, 3, 4], centroid: CGPoint(x: 0.5, y: 0.5), now: 10)
+        XCTAssertGreaterThan(on.dropDockControlUntil, 10)
     }
 }

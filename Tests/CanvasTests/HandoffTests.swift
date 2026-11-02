@@ -52,6 +52,7 @@ final class HandoffTests: XCTestCase {
     func testAClickKeepsTheClickedSpotUnderThePointer() {
         let p = plan(.clicked(at: CGPoint(x: 1000, y: 400), offset: CGPoint(x: 100, y: 50)))
         XCTAssertEqual(p.origin, CGPoint(x: 900, y: 350))
+        XCTAssertEqual(p.inPlaceOrigin, p.origin)
         XCTAssertTrue(p.clicked)
         XCTAssertNotNil(p.inPlace)
     }
@@ -96,6 +97,17 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(Handoff.fittedOrigin(o, size: CGSize(width: 800, height: 600), in: visible), o)
     }
 
+    /// Pinched in with its top 40 pt above the screen's: the window lands right under the menu bar, and
+    /// the plan keeps where it was asked, so the camera settles on it there (a click is fitted first,
+    /// so it never needs this).
+    func testAPinchNearTheTopLandsTheWindowUnderTheMenuBarAndRemembersWhereItWasAsked() {
+        let p = plan(.inPlace(around: CGPoint(x: 300, y: 10)), camera: Camera(origin: CGPoint(x: 2500, y: 2080), zoom: 0.5))
+        XCTAssertEqual(p.origin, CGPoint(x: 200, y: 38))
+        XCTAssertEqual(p.inPlaceOrigin, CGPoint(x: 200, y: -40))
+        XCTAssertEqual(p.inPlace, Camera(origin: CGPoint(x: 2800, y: 2040), zoom: 1))
+        XCTAssertEqual(p.camera, Camera(origin: CGPoint(x: 2800, y: 1962), zoom: 1))
+    }
+
     func testATiledWindowLinesUpWithItsArea() {
         // Tiled to the right half of an area that starts at (2800, 1900): the window's offset in it is (200, 100).
         let p = plan(.centered, tiledArea: CGRect(x: 2800, y: 1900, width: 1600, height: 1100))
@@ -136,6 +148,7 @@ final class HandoffTests: XCTestCase {
         let p = plan(.clicked(at: CGPoint(x: 1000, y: 10), offset: CGPoint(x: 100, y: 50)))
         XCTAssertEqual(p.origin.y, 38)
         XCTAssertEqual(p.inPlace, p.camera)
+        XCTAssertEqual(p.inPlaceOrigin, p.origin, "fitted, nothing left for the menu bar to clamp")
     }
 
     // MARK: A window's native place
@@ -163,6 +176,17 @@ final class HandoffTests: XCTestCase {
         let camera = Handoff.cameraAligning(window, with: CGRect(x: 600, y: 319, width: 800, height: 600))
         XCTAssertEqual(camera.toScreen(window.origin), CGPoint(x: 600, y: 319))
         XCTAssertEqual(camera.zoom, 1)
+    }
+
+    func testTheFixingCameraKeepsThePointUnderThePointerAtOneToOne() {
+        let camera = Camera(origin: CGPoint(x: 2500, y: 1500), zoom: 0.5)
+        let point = CGPoint(x: 700, y: 400)
+        let fixing = Handoff.cameraFixing(point, at: camera)
+        XCTAssertEqual(fixing.zoom, 1)
+        XCTAssertEqual(fixing.toWorld(point), camera.toWorld(point))
+        // The window drawn at (250, 250) 400×300 at the half zoom: the pointer is 450 pt in, 150 pt down
+        // on it; at 1:1 its real frame starts 900 pt left and 300 pt up of the pointer.
+        XCTAssertEqual(fixing.toScreen(window.origin), CGPoint(x: -200, y: 100))
     }
 
     func testACameraSeenFromGlobalAndBack() {

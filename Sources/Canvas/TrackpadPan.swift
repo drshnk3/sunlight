@@ -1,13 +1,13 @@
 import AppKit
 import os
 
-/// A four-finger drag (or three, by Settings › Trackpad, as the Mac's own swipes come) pans the canvas
-/// from anywhere: on the canvas, over windows too (where a one-finger drag would move them), and from
-/// inside an entered window, which brings the canvas back first. No modifier, no key first, and every
-/// direction pans, up included. A *tap* of the same fingers (down and up again without moving) shows
-/// everything, as Mission Control's swipe does; or, by Settings › Trackpad, a quick *flick* up does,
-/// Mission Control's own stroke, told from a drag up by its speed as the Mac tells them apart (swiped
-/// up slowly, Mission Control follows the fingers instead of opening). Thumb and three fingers
+/// A four-finger drag (or three, by Settings › How to use, as the Mac's own swipes come) pans the
+/// canvas from anywhere: on the canvas, over windows too (where a one-finger drag would move them), and
+/// from inside an entered window, which brings the canvas back first. No modifier, no key first, and
+/// every direction pans, up included. A *tap* of the same fingers (down and up again without moving)
+/// shows everything, as Mission Control's swipe does; or, by Settings › How to use, a quick *flick* up
+/// does, Mission Control's own stroke, told from a drag up by its speed as the Mac tells them apart
+/// (swiped up slowly, Mission Control follows the fingers instead of opening). Thumb and three fingers
 /// spreading apart is Show Desktop, as on the Mac, whichever count drags.
 ///
 /// The touches come straight from the trackpad through MultitouchSupport, the private framework Mac
@@ -122,6 +122,14 @@ final class TrackpadPan: @unchecked Sendable {
             return s.reset()
         }
         phases.forEach(send)
+    }
+
+    /// Sunlight on or off (the menu bar switch). Off, the four fingers are the Mac's own again: the
+    /// Dock-control events that make Mission Control's and Spaces' swipes pass. (They were dropped
+    /// whenever four fingers were down, on or off, so with Sunlight off a four-finger swipe did nothing
+    /// at all: not a pan, and not Mission Control either.)
+    @MainActor func setActive(_ active: Bool) {
+        state.withLock { $0.active = active }
     }
 
     // MARK: Touches
@@ -281,8 +289,10 @@ struct TrackpadRecognizer {
     /// The drag is held level (dy = 0) or plumb (dx = 0), decided as it begins; nil for a free
     /// (diagonal) drag.
     var lock: Lock?
-    /// Settings › Trackpad: a quick flick up is See All, instead of a tap.
+    /// Settings › How to use: a quick flick up is See All, instead of a tap.
     var swipeUpSeesAll = false
+    /// Sunlight is on: the drag's fingers are the canvas's, and the system's own swipes are held off.
+    var active = true
     /// The fingers moved or spread while no drag was under way: not a tap any more.
     var stirred = false
     /// Where the centroid was and when, as the drag began; a flick is measured from there.
@@ -301,7 +311,7 @@ struct TrackpadRecognizer {
     var gestureTouch = false
     /// Read by the event tap.
     var dropDockControlUntil: CFAbsoluteTime = 0
-    /// Settings › Trackpad: the fingers that drag, tap and flick, three or four. Show Desktop's spread
+    /// Settings › How to use: the fingers that drag, tap and flick, three or four. Show Desktop's spread
     /// is thumb and three fingers, four contacts, either way.
     var fingerCount = 4
     /// The most fingers down at once this touch. A touch that had more than the drag's fingers (a
@@ -314,9 +324,9 @@ struct TrackpadRecognizer {
         if let followed = self.device, followed != device { return [] }
         peak = ids.isEmpty ? 0 : max(peak, ids.count)
         // The Dock reads three- and four-finger swipes, whichever the Mac is set to: with three
-        // fingers chosen, both are Sunlight's (four for the spread).
+        // fingers chosen, both are Sunlight's (four for the spread). Only while Sunlight is on.
         if ids.count == fingerCount || ids.count == 4 { gestureTouch = true } else if ids.isEmpty { gestureTouch = false }
-        if gestureTouch { dropDockControlUntil = now + TrackpadPan.dockTail }
+        if gestureTouch, active { dropDockControlUntil = now + TrackpadPan.dockTail }
         let began = touchBegan ?? now
         if ids.isEmpty { touchBegan = nil } else if touchBegan == nil { touchBegan = now }
         let drags = ids.count == fingerCount && peak == fingerCount
