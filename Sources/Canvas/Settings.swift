@@ -364,7 +364,7 @@ enum Settings {
 
     /// Settings › General › "Sunlight's menu bar on the canvas": while the canvas is in front, the menu
     /// bar is Sunlight's own, so a click in it (Wi-Fi, the clock, any menu) stays on the canvas rather than
-    /// bringing the last app forward (see `MenuBarOwnership`). Sunlight has a Dock icon meanwhile. On by default.
+    /// bringing the last app forward (see `MenuBarOwnership`). Sunlight is a regular app meanwhile, with a Dock icon (hidden with the Dock by takeover). On by default.
     static var ownsMenuBar: Bool {
         get { defaults.object(forKey: ownsMenuBarKey) as? Bool ?? true }
         set {
@@ -1252,7 +1252,7 @@ private struct GeneralPane: View {
                 Toggle(isOn: model.bind({ Settings.ownsMenuBar }, { Settings.ownsMenuBar = $0 })) {
                     RowLabel(title: "Sunlight's menu bar on the canvas",
                              subtitle: "Clicks in the menu bar stay on the canvas.",
-                             info: "Off, the menu bar is the last app’s, and a click in it (Wi-Fi, the clock, a menu) goes back into that app. On, Sunlight shows in the Dock while the canvas is in front.")
+                             info: "Off, the menu bar is the last app’s, and a click in it (Wi-Fi, the clock, a menu) goes back into that app. On, Sunlight has a Dock icon, hidden with the Dock when it takes over the Mac.")
                 }
             } header: {
                 SectionHeader(title: "Menu bar")
